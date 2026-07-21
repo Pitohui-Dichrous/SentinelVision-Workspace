@@ -1,0 +1,6 @@
+# Compatibility entry for the generated fire-only dataset (fire is class 0).
+path: DATASETS/fire_only_legacy_v1
+train: images/train
+val: images/val
+nc: 1
+names: [fire]

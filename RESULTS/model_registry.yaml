@@ -1,0 +1,99 @@
+schema_version: 2
+policy:
+  deployment_root_only: true
+  auto_discover: true
+  auto_select_new_models: false
+  note: "RESULTS contains deployment weights only; replacement requires explicit user approval"
+
+class_profiles:
+  fire:
+    display: {zh: "火焰", en: "Fire"}
+    severity: critical
+    alert_enabled: true
+    color: "#F43F5E"
+  person:
+    display: {zh: "未戴安全帽", en: "NO HELMET"}
+    severity: warning
+    alert_enabled: true
+    color: "#38BDF8"
+  hat:
+    display: {zh: "已戴安全帽", en: "Helmet"}
+    severity: null
+    alert_enabled: false
+    color: "#EAB308"
+
+models:
+  combined:
+    display_name: COMBINED
+    deployment_path: Amphoreus_long_run_combined/weights/best.pt
+    expected_classes: [person, hat, fire]
+    class_map: {person: person, hat: hat, fire: fire}
+    default_selected: true
+    allow_class_overlap: false
+    status: legacy_in_use
+    artifact:
+      bytes: 173147948
+      sha256: 505efcf2bf73d569024fb4058bf73df4214ef8b3102572d4cb044d1ed49b19af
+    technical_check:
+      checked_at: 2026-07-20
+      checkpoint_load: passed
+      observed_classes: [person, hat, fire]
+    provenance:
+      training_project: unknown
+      training_computer: unknown
+      training_dataset: unknown
+      training_command: unknown
+    review:
+      manual_review: unknown
+      approved_by: unknown
+      approved_at: unknown
+
+  fire:
+    display_name: FIRE ONLY
+    deployment_path: Amphoreus_Fire_only/weights/best.pt
+    expected_classes: [fire]
+    class_map: {fire: fire}
+    default_selected: false
+    allow_class_overlap: false
+    status: legacy_in_use
+    artifact:
+      bytes: 173173484
+      sha256: 10ec88c6be45a04391915118229813b8fd777d32bea306074cf70dc74740071f
+    technical_check:
+      checked_at: 2026-07-20
+      checkpoint_load: passed
+      observed_classes: [fire]
+    provenance:
+      training_project: unknown
+      training_computer: unknown
+      training_dataset: unknown
+      training_command: unknown
+    review:
+      manual_review: unknown
+      approved_by: unknown
+      approved_at: unknown
+
+  helmet_only:
+    display_name: HELMET ONLY
+    deployment_path: Amphoreus_long_run_helmet_only/weights/best.pt
+    expected_classes: [person, hat]
+    class_map: {person: person, hat: hat}
+    default_selected: false
+    allow_class_overlap: false
+    status: legacy_in_use
+    artifact:
+      bytes: 173121324
+      sha256: c0c41237a853a08a5a01e33363f59e1bd23819a53b769aff88b52f82a095e763
+    technical_check:
+      checked_at: 2026-07-20
+      checkpoint_load: passed
+      observed_classes: [person, hat]
+    provenance:
+      training_project: unknown
+      training_computer: unknown
+      training_dataset: unknown
+      training_command: unknown
+    review:
+      manual_review: unknown
+      approved_by: unknown
+      approved_at: unknown

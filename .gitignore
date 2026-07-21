@@ -1,0 +1,63 @@
+# SentinelVision source repository
+#
+# Git tracks source code, scripts, configuration and documentation. Large or
+# machine-generated assets stay on the removable drive and are protected by
+# the integrity manifest instead of GitHub.
+
+# Portable runtimes and downloaded developer tools
+/.runtime/
+/RUNTIME/
+/TOOLS/
+
+# IDE, agent and Python caches
+/.idea/
+/.agents/
+/.vscode/
+**/__pycache__/
+*.py[cod]
+*.cache
+*.tmp
+*.partial
+
+# Local settings, credentials and secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.pfx
+*.p12
+*credentials*.json
+*token*.json
+auth.json
+
+# Datasets and generated training products
+/DATASETS/
+/data/*/
+!/data/hyps/
+!/data/images/
+!/data/scripts/
+/runs/
+/TRAINING_OUTPUTS/
+/MODEL_ARCHIVE/
+/RESULTS/*/
+
+# Model binaries. Keep their READMEs/manifests, not the binary weights.
+*.pt
+*.pth
+*.onnx
+*.engine
+*.torchscript
+*.tflite
+*.mlmodel
+*.pb
+*.weights
+
+# Runtime state and generated reports
+/alerts.csv
+/INTEGRITY/workspace_manifest.json
+/INTEGRITY/*.tmp
+
+# Operating-system debris
+Thumbs.db
+Desktop.ini
+.DS_Store

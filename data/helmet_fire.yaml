@@ -1,0 +1,7 @@
+# Compatibility entry for the generated, non-overlapping combined dataset.
+path: DATASETS/combined_legacy_v1
+train: images/train
+val: images/val
+test: images/test
+nc: 3
+names: [person, hat, fire]
