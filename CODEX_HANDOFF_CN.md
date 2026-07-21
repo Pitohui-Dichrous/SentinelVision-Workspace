@@ -123,3 +123,5 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File '.\portable\sync_github.
 8. 当前没有已知阻塞性故障。接手后应先询问用户下一项具体研究或开发目标，不要无目的重构已经稳定运行的训练、部署和检测链。
 
 更详细的小白使用说明见 `START_HERE_CN.md`，便携运行机制见 `PORTABLE_GUIDE_CN.md`，Git 操作见 `GIT_GUIDE_CN.md`。
+
+用户在完成编写 CODEX_HANDOFF_CN.md 文件后，又对git做了少量修改，详细使用方式请查看 GIT_GUIDE_CN.md

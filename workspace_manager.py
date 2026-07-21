@@ -34,10 +34,10 @@ PYTHON_EXECUTABLE = str(RUNTIME_PYTHON)
 
 class WorkspaceManager(QtWidgets.QMainWindow):
     PAGE_META = (
-        ("工作库概览", "环境、模型与常用入口集中在一个页面"),
-        ("训练新模型", "选择数据集和官方预训练权重，训练结果只进入候选区"),
-        ("审核与部署", "按步骤检查候选模型，明确批准后才进入 RESULTS"),
-        ("已部署模型", "查看 SENTINEL 启动时能够扫描到的正式模型"),
+        ("工作库概览", "完事开头难，不如先从检查环境开始吧！"),
+        ("训练新模型", "选择训练用数据集和YOLO官方预训练权重"),
+        ("审核与部署", "按步骤检查候选模型"),
+        ("已部署模型", "在这里查看 SENTINEL 启动时能够扫描到的正式模型"),
     )
 
     def __init__(self):
@@ -106,8 +106,8 @@ class WorkspaceManager(QtWidgets.QMainWindow):
             nav_layout.addWidget(button)
         nav_layout.addStretch(1)
 
-        offline = make_badge("●  PORTABLE · OFFLINE", "success")
-        offline.setToolTip("运行环境、缓存和训练输出全部保存在工作库中")
+        offline = make_badge("●  离线版本运行中...", "success")
+        offline.setToolTip("运行环境、缓存和训练输出全部保存在本地移动工作库中")
         nav_layout.addWidget(offline)
         location = QtWidgets.QLabel(str(PROJECT_ROOT))
         location.setProperty("textRole", "muted")
@@ -267,9 +267,9 @@ class WorkspaceManager(QtWidgets.QMainWindow):
         hero_copy.setSpacing(6)
         eyebrow = QtWidgets.QLabel("SENTINEL OPERATIONS")
         eyebrow.setProperty("textRole", "eyebrow")
-        headline = QtWidgets.QLabel("从数据集到实时检测，保持每一步可控")
+        headline = QtWidgets.QLabel("欢迎使用 SentinelVision [Beta] 控制台")
         headline.setProperty("textRole", "pageTitle")
-        description = QtWidgets.QLabel("训练候选与正式模型严格隔离；只有经过人工审核的权重才会进入 RESULTS。")
+        description = QtWidgets.QLabel("仅作内部学习用途，请勿商用。支持PITO谢谢喵")
         description.setProperty("textRole", "muted")
         description.setWordWrap(True)
         hero_copy.addWidget(eyebrow)
@@ -288,10 +288,10 @@ class WorkspaceManager(QtWidgets.QMainWindow):
         metrics = QtWidgets.QGridLayout()
         metrics.setHorizontalSpacing(12)
         metrics.setVerticalSpacing(12)
-        gpu_card, self.home_gpu = self._metric_card("计算设备", gpu_value, "PyTorch CUDA 推理与训练", "success")
-        model_card, _ = self._metric_card("正式模型", str(deployed_count), "RESULTS 中的 best.pt", "primary")
-        candidate_card, _ = self._metric_card("待审候选", str(candidate_count), "尚未进入正式检测", "warning" if candidate_count else "neutral")
-        runtime_card, _ = self._metric_card("运行模式", "离线就绪", "内嵌 Python · 不依赖本机环境", "success")
+        gpu_card, self.home_gpu = self._metric_card("计算设备", gpu_value, "咦？怎么不是 H100？", "success")
+        model_card, _ = self._metric_card("正式模型", str(deployed_count), "也就是 RESULTS 文件夹中的模型数量", "primary")
+        candidate_card, _ = self._metric_card("待审候选模型", str(candidate_count), "尚未接入 SENTINEL 的数量", "warning" if candidate_count else "neutral")
+        runtime_card, _ = self._metric_card("运行模式", "离线版本", "移动工作站内嵌 Python，不依赖本机环境", "success")
         for index, card in enumerate((gpu_card, model_card, candidate_card, runtime_card)):
             metrics.addWidget(card, index // 2, index % 2)
         metrics.setColumnStretch(0, 1)
@@ -310,7 +310,7 @@ class WorkspaceManager(QtWidgets.QMainWindow):
         action_layout.addWidget(self._button("打开中文使用说明", lambda: self._open_path(PROJECT_ROOT / "START_HERE_CN.md")), 2, 0)
         action_layout.addWidget(self._button("快速检查关键文件", lambda: self._run_utility("portable/verify_workspace.py")), 2, 1)
         action_layout.addWidget(self._button("保存当前代码版本", lambda: self._launch_command_file("SAVE_VERSION.cmd"), primary=True), 3, 0)
-        action_layout.addWidget(self._button("同步私有 GitHub", lambda: self._launch_command_file("SYNC_GITHUB.cmd")), 3, 1)
+        action_layout.addWidget(self._button("与 GitHub 最新版本同步", lambda: self._launch_command_file("SYNC_GITHUB.cmd")), 3, 1)
         action_layout.addWidget(self._button("查看 Git 历史", lambda: self._launch_command_file("GIT_STATUS.cmd")), 4, 0)
         action_layout.addWidget(self._button("Git 使用说明", lambda: self._open_path(PROJECT_ROOT / "GIT_GUIDE_CN.md")), 4, 1)
         layout.addWidget(actions)
@@ -328,7 +328,7 @@ class WorkspaceManager(QtWidgets.QMainWindow):
     def _build_training_tab(self):
         page, layout = self._page()
         intro = QtWidgets.QLabel(
-            "训练只写入 TRAINING_OUTPUTS 候选区。开始前会强制检查数据集，完成后仍需在“审核与部署”页人工批准。"
+            "训练结果只存入 TRAINING_OUTPUTS 候选区。训练开始前会强制检查数据集，完成后仍需在“审核”页人工批准。"
         )
         intro.setWordWrap(True)
         intro.setObjectName("Hint")
@@ -346,7 +346,7 @@ class WorkspaceManager(QtWidgets.QMainWindow):
         self.weights_preset.setToolTip("仅列出与当前目标检测训练流程兼容的官方 YOLOv5 v7.0 权重")
         self.weights_edit = QtWidgets.QLineEdit()
         self.weights_edit.setReadOnly(True)
-        self.weights_edit.setPlaceholderText("选择官方预训练权重，或浏览可信的自定义 .pt")
+        self.weights_edit.setPlaceholderText("自动查找失败，请手动浏览可信的自定义 .pt")
         self.weights_browse = self._button("浏览…", self._browse_training_weights)
         self.experiment_name = QtWidgets.QLineEdit("new_target")
         self.epochs = QtWidgets.QSpinBox(); self.epochs.setRange(1, 10000); self.epochs.setValue(100)
@@ -357,9 +357,9 @@ class WorkspaceManager(QtWidgets.QMainWindow):
             ("数据集 YAML", self.dataset_combo, self.dataset_browse),
             ("预训练型号", self.weights_preset, None),
             ("实际权重文件", self.weights_edit, self.weights_browse),
-            ("实验名称", self.experiment_name, None),
+            ("训练名称", self.experiment_name, None),
             ("训练轮数 epochs", self.epochs, None),
-            ("批量 batch（-1 自动）", self.batch_size, None),
+            ("批量 batch（默认 -1）", self.batch_size, None),
             ("图像尺寸", self.image_size, None),
             ("数据线程（Windows 建议 0）", self.workers, None),
         ]
@@ -388,9 +388,9 @@ class WorkspaceManager(QtWidgets.QMainWindow):
         self._on_weight_preset_changed(default_index)
 
         buttons = QtWidgets.QHBoxLayout()
-        self.btn_check_dataset = self._button("先检查数据集", self._check_selected_dataset)
+        self.btn_check_dataset = self._button("检查数据集", self._check_selected_dataset)
         self.btn_start_training = self._button("开始训练候选模型", self._start_training, primary=True)
-        self.btn_resume_training = self._button("安全续训 last.pt", self._resume_training)
+        self.btn_resume_training = self._button("从 last.pt 继续", self._resume_training)
         self.btn_stop_training = self._button("停止训练", self._stop_training)
         self.btn_stop_training.setProperty("variant", "danger")
         self.btn_stop_training.setEnabled(False)
@@ -410,26 +410,26 @@ class WorkspaceManager(QtWidgets.QMainWindow):
     def _build_deployment_tab(self):
         page, layout = self._page()
         warning = QtWidgets.QLabel(
-            "只有完成指标、类别、失败样本和真实视频检查，并点击最终批准，模型才会被复制到 RESULTS。"
+            "注意：人工完成指标、类别、失败样本和真实视频检查并点击最终批准后模型才会被 SENTINEL 使用。"
         )
         warning.setObjectName("Warning")
         warning.setWordWrap(True)
         layout.addWidget(warning)
 
-        candidate_group = QtWidgets.QGroupBox("1. 选择并技术检查候选权重")
+        candidate_group = QtWidgets.QGroupBox("1. 选择需要检查的候选权重")
         candidate_layout = QtWidgets.QGridLayout(candidate_group)
         self.candidate_combo = QtWidgets.QComboBox(); self.candidate_combo.setEditable(True)
         candidate_layout.addWidget(QtWidgets.QLabel("候选 best.pt"), 0, 0)
         candidate_layout.addWidget(self.candidate_combo, 0, 1)
         candidate_layout.addWidget(self._button("浏览…", self._browse_candidate), 0, 2)
-        candidate_layout.addWidget(self._button("读取类别与指纹", self._inspect_candidate, primary=True), 0, 3)
+        candidate_layout.addWidget(self._button("读取模型详情", self._inspect_candidate, primary=True), 0, 3)
         self.candidate_summary = QtWidgets.QLabel("尚未检查候选模型")
         self.candidate_summary.setObjectName("Hint")
         self.candidate_summary.setWordWrap(True)
         candidate_layout.addWidget(self.candidate_summary, 1, 0, 1, 4)
-        candidate_layout.addWidget(self._button("打开候选实验目录", self._open_candidate_run), 2, 0, 1, 2)
-        candidate_layout.addWidget(self._button("用图片/视频测试候选", self._test_candidate_media), 2, 2)
-        candidate_layout.addWidget(self._button("打开测试结果", lambda: self._open_path(TRAINING_OUTPUTS_DIR / "_REVIEWS")), 2, 3)
+        candidate_layout.addWidget(self._button("查看候选模型目录", self._open_candidate_run), 2, 0, 1, 2)
+        candidate_layout.addWidget(self._button("选择图片或视频进行测试", self._test_candidate_media), 2, 2)
+        candidate_layout.addWidget(self._button("查看测试结果", lambda: self._open_path(TRAINING_OUTPUTS_DIR / "_REVIEWS")), 2, 3)
         layout.addWidget(candidate_group)
 
         identity_group = QtWidgets.QGroupBox("2. 模型与类别定义")
@@ -468,7 +468,7 @@ class WorkspaceManager(QtWidgets.QMainWindow):
         review_layout.addWidget(self.review_notes, 3, 1)
         review_layout.addWidget(self.replace_existing, 4, 0, 1, 2)
         layout.addWidget(review_group)
-        self.btn_deploy = self._button("最终批准并部署到 RESULTS", self._deploy_candidate, primary=True)
+        self.btn_deploy = self._button("最终批准并部署到 SENTINEL", self._deploy_candidate, primary=True)
         layout.addWidget(self.btn_deploy)
         self.candidate_combo.currentTextChanged.connect(self._candidate_selection_changed)
         return page
@@ -476,9 +476,9 @@ class WorkspaceManager(QtWidgets.QMainWindow):
     def _build_models_tab(self):
         page, layout = self._page()
         row = QtWidgets.QHBoxLayout()
-        row.addWidget(self._button("重新扫描 RESULTS", self._refresh_models, primary=True))
-        row.addWidget(self._button("打开 RESULTS", lambda: self._open_path(RESULTS_DIR)))
-        row.addWidget(self._button("打开模型归档", lambda: self._open_path(PROJECT_ROOT / "MODEL_ARCHIVE")))
+        row.addWidget(self._button("重新扫描可用模型", self._refresh_models, primary=True))
+        row.addWidget(self._button("打开正式模型文件夹", lambda: self._open_path(RESULTS_DIR)))
+        row.addWidget(self._button("打开归档文件夹", lambda: self._open_path(PROJECT_ROOT / "MODEL_ARCHIVE")))
         row.addStretch(1)
         layout.addLayout(row)
         self.models_table = QtWidgets.QTableWidget(0, 5)
@@ -590,7 +590,7 @@ class WorkspaceManager(QtWidgets.QMainWindow):
             ]
             for column, value in enumerate(values):
                 self.models_table.setItem(row, column, QtWidgets.QTableWidgetItem(value))
-        self.models_hint.setText("共发现 %d 个模型，其中 %d 个可用。SENTINEL 每次启动都会重新扫描。" % (
+        self.models_hint.setText("共发现 %d 个模型，其中 %d 个可用。" % (
             len(snapshot.models), len(snapshot.selectable_models)
         ))
 
