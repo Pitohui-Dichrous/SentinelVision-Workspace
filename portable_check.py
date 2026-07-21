@@ -288,7 +288,7 @@ def run_check():
         "pretrained_weights.py", "ui_theme.py",
         "dataset_audit.py", "portable/setup_environment.ps1",
         "portable/runtime_env.cmd",
-        "portable/verify_workspace.py", "portable/build_integrity_manifest.py", "VERIFY_WORKSPACE.cmd",
+        "portable/verify_workspace.py", "VERIFY_WORKSPACE.cmd",
         "requirements.txt", "requirements-torch-cu118.txt",
         "ui_font.py", "START_HERE.cmd", "START_HERE_CN.md",
         "assets/NotoSansSC-VF.ttf", "assets/NotoSansSC-LICENSE.txt",

@@ -1,8 +1,8 @@
 # SentinelVision source repository
 #
 # Git tracks source code, scripts, configuration and documentation. Large or
-# machine-generated assets stay on the removable drive and are protected by
-# the integrity manifest instead of GitHub.
+# machine-generated assets stay on the removable drive and remain outside the
+# source repository.
 
 # Portable runtimes and downloaded developer tools
 /.runtime/

@@ -29,8 +29,8 @@ $files = @(
     "portable\git_common.ps1", "portable\install_git_tools.ps1",
     "portable\enable_git.ps1", "portable\save_version.ps1",
     "portable\git_status.ps1", "portable\sync_github.ps1",
-    "portable\download_pretrained_weights.ps1",
-    "portable\apply_to_e_drive.ps1", "portable\build_integrity_manifest.py"
+    "portable\download_pretrained_weights.ps1", "portable\verify_workspace.py",
+    "portable\apply_to_e_drive.ps1"
 )
 
 foreach ($relative in $files) {

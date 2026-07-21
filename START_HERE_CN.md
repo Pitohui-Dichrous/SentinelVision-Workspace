@@ -12,7 +12,7 @@
 
 如果 `RUNTIME` 被误删或损坏，双击 `SETUP_ENVIRONMENT.cmd`。它只使用工作库自带的 Python 压缩包和离线 wheelhouse 重建，不读取本机 Python、不联网。
 
-怀疑移动硬盘曾异常断开或文件受损时，关闭训练和 SENTINEL 后双击 `VERIFY_WORKSPACE.cmd`。它会读取整个工作库并逐文件核对交付时的 SHA-256；过程只读，耗时取决于 USB 速度。
+怀疑移动硬盘曾异常断开或复制不完整时，关闭训练和 SENTINEL 后双击 `VERIFY_WORKSPACE.cmd`。它只检查固定关键文件、10 个训练权重和 `RESULTS` 模型是否存在且大小正常，不遍历整个数据集，也不计算全库哈希，通常几秒内完成。
 
 不要在训练、复制模型或安装环境时拔出移动硬盘。
 

@@ -308,7 +308,7 @@ class WorkspaceManager(QtWidgets.QMainWindow):
         action_layout.addWidget(self._button("运行完整环境自检", lambda: self._run_utility("portable_check.py")), 1, 0)
         action_layout.addWidget(self._button("打开工作库文件夹", lambda: self._open_path(PROJECT_ROOT)), 1, 1)
         action_layout.addWidget(self._button("打开中文使用说明", lambda: self._open_path(PROJECT_ROOT / "START_HERE_CN.md")), 2, 0)
-        action_layout.addWidget(self._button("验证工作库完整性", lambda: self._run_utility("portable/verify_workspace.py")), 2, 1)
+        action_layout.addWidget(self._button("快速检查关键文件", lambda: self._run_utility("portable/verify_workspace.py")), 2, 1)
         action_layout.addWidget(self._button("保存当前代码版本", lambda: self._launch_command_file("SAVE_VERSION.cmd"), primary=True), 3, 0)
         action_layout.addWidget(self._button("同步私有 GitHub", lambda: self._launch_command_file("SYNC_GITHUB.cmd")), 3, 1)
         action_layout.addWidget(self._button("查看 Git 历史", lambda: self._launch_command_file("GIT_STATUS.cmd")), 4, 0)

@@ -12,7 +12,7 @@
 
 `START_SENTINEL.cmd`、`CHECK_ENVIRONMENT.cmd`、`CHECK_DATASETS.cmd` 和 `TRAIN_SAFE.cmd` 仍保留给需要单独执行某一步的用户。
 
-`VERIFY_WORKSPACE.cmd` 是可选的只读全库验收入口。移动盘异常断开、复制后或怀疑文件损坏时，可用它将所有交付文件与 SHA-256 清单逐项比较。
+`VERIFY_WORKSPACE.cmd` 是可选的快速验收入口。移动盘异常断开或复制后，可用它检查固定关键文件是否存在、大小是否明显异常；它不会遍历整个数据集，也不会计算全库哈希。
 
 ## 目标电脑条件
 
