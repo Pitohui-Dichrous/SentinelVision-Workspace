@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import codecs
 import os
 import re
 import subprocess
@@ -630,11 +631,56 @@ class WorkspaceManager(QtWidgets.QMainWindow):
         return process
 
     @staticmethod
-    def _append_process_output(process, log):
+    def _render_terminal_text(log, text, overwrite_current=False):
+        """Render terminal CR/LF semantics without duplicating tqdm progress rows."""
+        cursor = log.textCursor()
+        cursor.movePosition(QtGui.QTextCursor.MoveOperation.End)
+
+        for token in re.split(r"(\r\n|\r|\n)", text):
+            if not token:
+                continue
+            if token == "\r":
+                overwrite_current = True
+                continue
+            if token in ("\n", "\r\n"):
+                cursor.movePosition(QtGui.QTextCursor.MoveOperation.End)
+                cursor.insertBlock()
+                overwrite_current = False
+                continue
+
+            cursor.movePosition(QtGui.QTextCursor.MoveOperation.End)
+            if overwrite_current:
+                cursor.movePosition(
+                    QtGui.QTextCursor.MoveOperation.StartOfBlock,
+                    QtGui.QTextCursor.MoveMode.KeepAnchor,
+                )
+                cursor.removeSelectedText()
+                overwrite_current = False
+            cursor.insertText(token)
+
+        cursor.movePosition(QtGui.QTextCursor.MoveOperation.End)
+        log.setTextCursor(cursor)
+        log.ensureCursorVisible()
+        return overwrite_current
+
+    @classmethod
+    def _append_process_output(cls, process, log):
         raw = bytes(process.readAllStandardOutput())
-        if raw:
-            log.appendPlainText(raw.decode("utf-8", errors="replace").rstrip())
-            cursor = log.textCursor(); cursor.movePosition(QtGui.QTextCursor.MoveOperation.End); log.setTextCursor(cursor)
+        if not raw:
+            return
+
+        decoder = getattr(process, "_sentinel_utf8_decoder", None)
+        if decoder is None:
+            decoder = codecs.getincrementaldecoder("utf-8")(errors="replace")
+            process._sentinel_utf8_decoder = decoder
+        text = decoder.decode(raw, final=False)
+        if not text:
+            return
+
+        overwrite_current = getattr(process, "_sentinel_overwrite_current", False)
+        process._sentinel_overwrite_current = cls._render_terminal_text(
+            log, text, overwrite_current
+        )
 
     def _check_selected_dataset(self):
         dataset = self.dataset_combo.currentText().strip()
