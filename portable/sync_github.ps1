@@ -10,6 +10,12 @@ $gh = $tools.Gh
 $expectedLogin = "Pitohui-Dichrous"
 $repository = "Pitohui-Dichrous/SentinelVision-Workspace"
 
+# GitHub CLI may invoke `git` during `gh auth login` (for example while
+# configuring the HTTPS credential helper).  Add both portable tool folders
+# before any gh command, so a clean public computer does not need Git installed
+# globally or have the removable-drive Git directory in its permanent PATH.
+Enable-PortableGitHubAuth -Git $git -Gh $gh
+
 if (-not (Test-GitRepository -Git $git)) {
     & (Join-Path $PSScriptRoot "enable_git.ps1")
     if ($LASTEXITCODE -ne 0) { throw "Git initialization failed." }
@@ -24,7 +30,6 @@ if (-not (Test-NativeCommand -Executable $gh -Arguments @("auth", "status", "--h
     Write-Host "The token is stored by Windows on this computer, never on the removable drive."
     Invoke-Checked -Executable $gh -Arguments @("auth", "login", "--hostname", "github.com", "--git-protocol", "https", "--web")
 }
-Enable-PortableGitHubAuth -Git $git -Gh $gh
 $gitAuth = @(Get-PortableGitHubConfigArguments -Gh $gh)
 
 $actualLogin = ((& $gh api user --jq ".login") | Out-String).Trim()
