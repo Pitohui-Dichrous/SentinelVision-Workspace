@@ -4,8 +4,7 @@ $ErrorActionPreference = "Stop"
 . (Join-Path $PSScriptRoot "git_common.ps1")
 
 $root = Get-ProjectRoot
-$tools = Ensure-GitTools
-$git = $tools.Git
+$git = Ensure-GitExecutable
 
 if (-not (Test-GitRepository -Git $git)) {
     Invoke-Checked -Executable $git -Arguments @("-C", $root, "init", "-b", "main")

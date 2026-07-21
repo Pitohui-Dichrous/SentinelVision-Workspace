@@ -9,9 +9,7 @@ $ErrorActionPreference = "Stop"
 . (Join-Path $PSScriptRoot "git_common.ps1")
 
 $root = Get-ProjectRoot
-$tools = Ensure-GitTools
-$git = $tools.Git
-$gh = $tools.Gh
+$git = Ensure-GitExecutable
 
 if (-not (Test-GitRepository -Git $git)) {
     & (Join-Path $PSScriptRoot "enable_git.ps1")
@@ -34,14 +32,17 @@ Invoke-Checked -Executable $git -Arguments @("-C", $root, "commit", "-m", $Messa
 Write-Host "[OK] Local version committed: $Message"
 
 if (-not $NoPush) {
-    if (Test-NativeCommand -Executable $gh -Arguments @("auth", "status", "--hostname", "github.com")) {
+    $gh = Find-GhExecutable
+    if ($null -ne $gh -and (Test-NativeCommand -Executable $gh -Arguments @("auth", "status", "--hostname", "github.com"))) {
+        Enable-PortableGitHubAuth -Git $git -Gh $gh
+        $gitAuth = @(Get-PortableGitHubConfigArguments -Gh $gh)
         Ensure-OriginRemote -Git $git
-        & $git -C $root push origin main
+        & $git @gitAuth -C $root push origin main
         if ($LASTEXITCODE -eq 0) {
             Write-Host "[OK] GitHub is synchronized."
         }
         else {
-            Write-Warning "The local version is safe, but GitHub push needs SYNC_GITHUB.cmd."
+            throw "The local version is safe, but GitHub push failed. Run SYNC_GITHUB.cmd."
         }
     }
     else {

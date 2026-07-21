@@ -10,8 +10,13 @@ if (-not (Test-Path -LiteralPath $Destination -PathType Container)) {
     throw "Target workspace not found: $Destination"
 }
 $target = (Resolve-Path -LiteralPath $Destination).Path
-if ($target -ne "E:\SentinelVision_Workspace") {
-    throw "Refusing unexpected destination: $target"
+if ($target -eq $source) {
+    throw "Source and destination workspaces must be different."
+}
+if (-not (Test-Path -LiteralPath (Join-Path $target "SentinelVision4.py") -PathType Leaf) -or
+    -not (Test-Path -LiteralPath (Join-Path $target "RESULTS") -PathType Container) -or
+    -not (Test-Path -LiteralPath (Join-Path $target "models") -PathType Container)) {
+    throw "Refusing a destination that is not an existing SentinelVision workspace: $target"
 }
 
 $files = @(
@@ -50,4 +55,3 @@ if (Test-Path -LiteralPath $weightReadme -PathType Leaf) {
 }
 
 Write-Host "[OK] E-drive source upgrade copied. Datasets, RESULTS and runtimes were untouched."
-

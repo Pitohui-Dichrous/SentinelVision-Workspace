@@ -64,17 +64,56 @@ function Test-NativeCommand {
 }
 
 function Ensure-GitTools {
+    $git = Ensure-GitExecutable
+    $gh = Ensure-GhExecutable
+    return [pscustomobject]@{ Git = $git; Gh = $gh }
+}
+
+function Ensure-GitExecutable {
     $git = Find-GitExecutable
-    $gh = Find-GhExecutable
-    if ($null -eq $git -or $null -eq $gh) {
+    if ($null -eq $git) {
         & (Join-Path $PSScriptRoot "install_git_tools.ps1")
         if ($LASTEXITCODE -ne 0) { throw "Portable Git tool installation failed." }
         $git = Find-GitExecutable
-        $gh = Find-GhExecutable
     }
     if ($null -eq $git) { throw "git.exe is unavailable." }
+    return $git
+}
+
+function Ensure-GhExecutable {
+    $gh = Find-GhExecutable
+    if ($null -eq $gh) {
+        & (Join-Path $PSScriptRoot "install_git_tools.ps1")
+        if ($LASTEXITCODE -ne 0) { throw "Portable GitHub CLI installation failed." }
+        $gh = Find-GhExecutable
+    }
     if ($null -eq $gh) { throw "gh.exe is unavailable." }
-    return [pscustomobject]@{ Git = $git; Gh = $gh }
+    return $gh
+}
+
+function Enable-PortableGitHubAuth {
+    param(
+        [Parameter(Mandatory = $true)][string]$Git,
+        [Parameter(Mandatory = $true)][string]$Gh
+    )
+    # gh occasionally invokes git internally, so expose only the portable tools
+    # to this process. Nothing is added to the host computer's permanent PATH.
+    $gitDirectory = Split-Path -Parent $Git
+    $ghDirectory = Split-Path -Parent $Gh
+    $env:PATH = "$gitDirectory;$ghDirectory;$env:PATH"
+
+}
+
+function Get-PortableGitHubConfigArguments {
+    param([Parameter(Mandatory = $true)][string]$Gh)
+    # These -c values apply to one git process only. The first clears inherited
+    # helpers; the second points Git at the gh executable on the drive's current
+    # letter. No credential or absolute drive path is persisted in Git config.
+    $ghForGit = $Gh.Replace("\", "/")
+    return @(
+        "-c", "credential.helper=",
+        "-c", "credential.https://github.com.helper=!`"$ghForGit`" auth git-credential"
+    )
 }
 
 function Ensure-OriginRemote {
@@ -95,11 +134,33 @@ function Test-GitRepository {
 function Assert-SafeStagedFiles {
     param([Parameter(Mandatory = $true)][string]$Git)
     $limit = 95MB
-    $staged = & $Git -C $script:ProjectRoot diff --cached --name-only --diff-filter=ACMR
+    $stagedOutput = @(& $Git -C $script:ProjectRoot -c core.quotepath=false diff --cached --name-only --diff-filter=ACMR -z)
     if ($LASTEXITCODE -ne 0) { throw "Unable to inspect staged files." }
+    $staged = @(([string]::Join("`n", $stagedOutput)) -split "`0" | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
     foreach ($relative in $staged) {
-        if ([string]::IsNullOrWhiteSpace($relative)) { continue }
-        $path = Join-Path $script:ProjectRoot $relative
+        $normalized = $relative.Replace("\", "/")
+        $lower = $normalized.ToLowerInvariant()
+        $blockedRoot = @(
+            ".runtime/", "runtime/", "tools/", "datasets/", "runs/",
+            "training_outputs/", "model_archive/"
+        ) | Where-Object { $lower.StartsWith($_) } | Select-Object -First 1
+        $blockedDataSubdirectory = (
+            $lower -match '^data/[^/]+/' -and
+            $lower -notmatch '^data/(hyps|images|scripts)/'
+        )
+        $blockedResultsModel = ($lower -match '^results/.+/')
+        $blockedModelBinary = ($lower -match '\.(pt|pth|onnx|engine|torchscript|tflite|mlmodel|pb|weights|ckpt|safetensors)$')
+        $blockedCredential = (
+            $lower -match '(^|/)\.env($|\.)' -or
+            $lower -match '\.(pem|pfx|p12)$' -or
+            $lower -match '(^|/)(auth|[^/]*credentials[^/]*|[^/]*token[^/]*)\.json$'
+        )
+        $blockedRuntimeReport = ($lower -eq "alerts.csv" -or $lower -eq "integrity/workspace_manifest.json")
+        if ($null -ne $blockedRoot -or $blockedDataSubdirectory -or $blockedResultsModel -or $blockedModelBinary -or $blockedCredential -or $blockedRuntimeReport) {
+            throw "Protected workspace content cannot be committed: $normalized"
+        }
+
+        $path = Join-Path $script:ProjectRoot ($normalized.Replace("/", "\"))
         if ((Test-Path -LiteralPath $path -PathType Leaf) -and (Get-Item -LiteralPath $path).Length -gt $limit) {
             throw "GitHub blocks files above 100 MB. Remove this staged file: $relative"
         }
