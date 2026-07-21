@@ -1,7 +1,7 @@
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
-$message = Read-Host "Enter commit message (required)"
+$message = Read-Host "Commit message (required)"
 if ([string]::IsNullOrWhiteSpace($message)) {
     Write-Host "[ERROR] Commit message cannot be empty. No commit was created."
     exit 2
