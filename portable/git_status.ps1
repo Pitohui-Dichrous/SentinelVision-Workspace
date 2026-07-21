@@ -18,5 +18,8 @@ Write-Host "=== Workspace status ==="
 & $git -C $root status --short --branch
 Write-Host ""
 Write-Host "=== Recent versions ==="
-& $git -C $root log --date=local --pretty=format:"%h  %ad  %s" -n 12
+# The portable Git executable may be called without its bundled usr\bin on
+# PATH, so its default `less` pager is not guaranteed to be available.
+# Status output is short; print it directly instead of spawning a pager.
+& $git --no-pager -C $root log --date=local --pretty=format:"%h  %ad  %s" -n 12
 Write-Host ""
