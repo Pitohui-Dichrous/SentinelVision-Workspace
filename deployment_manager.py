@@ -67,6 +67,15 @@ class DeploymentManager:
         self.registry_path = self.results_dir / "model_registry.yaml"
         self.archive_root = self.project_root / "MODEL_ARCHIVE"
 
+    def _candidate_provenance(self, candidate_path: Path) -> Dict[str, str]:
+        """Record an audit hint without persisting a removable-drive letter."""
+        resolved = Path(candidate_path).resolve()
+        try:
+            relative = resolved.relative_to(self.project_root).as_posix()
+        except ValueError:
+            return {"candidate_path": resolved.name, "candidate_location": "external"}
+        return {"candidate_path": relative, "candidate_location": "workspace"}
+
     def _read_registry(self):
         if self.registry_path.is_file():
             with self.registry_path.open("r", encoding="utf-8-sig") as handle:
@@ -247,7 +256,7 @@ class DeploymentManager:
                     "checkpoint_metadata": "passed",
                     "observed_classes": list(candidate.classes),
                 },
-                "provenance": {"candidate_path": str(candidate.path)},
+                "provenance": self._candidate_provenance(candidate.path),
                 "review": review_record,
             }
             temporary_registry = self.registry_path.with_suffix(".yaml.tmp")
