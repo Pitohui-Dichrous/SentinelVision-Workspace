@@ -73,8 +73,8 @@ class WorkspaceManager(QtWidgets.QMainWindow):
         nav_layout.setSpacing(8)
 
         brand_row = QtWidgets.QHBoxLayout()
-        logo = make_badge("SV", "primary")
-        logo.setFixedSize(42, 34)
+        logo = make_badge("🧠🤖", "primary")
+        logo.setFixedSize(48, 34)
         brand_text = QtWidgets.QVBoxLayout()
         brand_text.setSpacing(0)
         brand = QtWidgets.QLabel("SentinelVision")
