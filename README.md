@@ -1,6 +1,6 @@
 # SentinelVision 项目入口
 
-本目录已从原始 YOLOv5 仓库扩展为 SentinelVision 安全帽/火灾检测项目。新手请先阅读 [移动硬盘使用说明](PORTABLE_GUIDE_CN.md)，不要直接照搬下方的 YOLOv5 通用命令。
+本目录已从原始 YOLOv5 仓库扩展为 SentinelVision 检测项目。本项目预期可在独立移动硬盘中工作，新手请先阅读 [移动硬盘使用说明](PORTABLE_GUIDE_CN.md)。
 
 - 首次配置：双击 `SETUP_ENVIRONMENT.cmd`
 - 启动前端：双击 `START_SENTINEL.cmd`
