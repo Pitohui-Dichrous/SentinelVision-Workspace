@@ -70,6 +70,7 @@ class TrackedHead:
     hits: int
     lost_frames: int
     confirmed: bool
+    evidence_eligible: bool = True
 
 
 @dataclass(frozen=True)
@@ -130,6 +131,10 @@ class PipelineAlert:
     source_model_ids: Tuple[str, ...]
     stable_state: PPEState
     risk_state: RiskState
+    evidence_hits: int = 0
+    evidence_duration: float = 0.0
+    evidence_stability: float = 0.0
+    decision_reason: str = ""
 
 
 @dataclass(frozen=True)
@@ -161,6 +166,21 @@ class PipelineMetrics:
     alerts_emitted: int
     active_tracks: int
     active_candidates: int = 0
+    candidates_created: int = 0
+    candidates_promoted: int = 0
+    tentative_retired: int = 0
+    confirmed_retired: int = 0
+    admission_dropped: int = 0
+    low_confidence_filtered: int = 0
+    invalid_observations: int = 0
+    high_water_candidates: int = 0
+    strict_matches: int = 0
+    reacquire_attempts: int = 0
+    reacquire_successes: int = 0
+    ambiguity_rejections: int = 0
+    pipeline_ms_last: float = 0.0
+    pipeline_ms_p95: float = 0.0
+    pipeline_ms_max: float = 0.0
 
     def as_dict(self) -> Mapping[str, Any]:
         return {
@@ -177,6 +197,21 @@ class PipelineMetrics:
             "alerts_emitted": self.alerts_emitted,
             "active_tracks": self.active_tracks,
             "active_candidates": self.active_candidates,
+            "candidates_created": self.candidates_created,
+            "candidates_promoted": self.candidates_promoted,
+            "tentative_retired": self.tentative_retired,
+            "confirmed_retired": self.confirmed_retired,
+            "admission_dropped": self.admission_dropped,
+            "low_confidence_filtered": self.low_confidence_filtered,
+            "invalid_observations": self.invalid_observations,
+            "high_water_candidates": self.high_water_candidates,
+            "strict_matches": self.strict_matches,
+            "reacquire_attempts": self.reacquire_attempts,
+            "reacquire_successes": self.reacquire_successes,
+            "ambiguity_rejections": self.ambiguity_rejections,
+            "pipeline_ms_last": self.pipeline_ms_last,
+            "pipeline_ms_p95": self.pipeline_ms_p95,
+            "pipeline_ms_max": self.pipeline_ms_max,
         }
 
 

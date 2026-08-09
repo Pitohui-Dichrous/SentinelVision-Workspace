@@ -79,6 +79,22 @@ class TemporalEvidenceEngine:
             state.pending_frames = 0
         return self._estimate(track_id, PPEState.UNKNOWN, 0.0, state, changed)
 
+    def snapshot(
+        self,
+        track_id: int,
+        raw_state: PPEState = PPEState.UNKNOWN,
+        raw_confidence: float = 0.0,
+    ) -> TemporalEstimate:
+        """Read the current estimate without adding alert evidence.
+
+        This is used when a low-confidence observation is accepted only for
+        geometric association.  It may move a box, but it cannot manufacture
+        temporal votes, recovery evidence, or an alarm.
+        """
+
+        state = self._state(track_id)
+        return self._estimate(track_id, raw_state, raw_confidence, state, False)
+
     def _candidate(self, state: _TemporalTrack) -> PPEState:
         evidence = tuple(item for item in state.history if not item.missing)
         if not evidence:

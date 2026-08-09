@@ -5,6 +5,7 @@ the safety logic can be replayed and unit-tested independently from inference.
 """
 
 from .config import (
+    AlertValidationConfig,
     ConfigError,
     PPEConflictConfig,
     RiskConfig,
@@ -16,6 +17,7 @@ from .config import (
     load_safety_pipeline_config_checked,
 )
 from .clock import PipelineClock
+from .alert_validation import AlertEvidenceGate
 from .pipeline import PPETemporalPipeline
 from .ppe_conflict import PPEConflictResolver
 from .journal import JsonlEventJournal
@@ -24,6 +26,8 @@ from .spatial import filter_monitoring_domain
 from .types import PPEState, RiskState
 
 __all__ = [
+    "AlertValidationConfig",
+    "AlertEvidenceGate",
     "ConfigError",
     "PPEConflictConfig",
     "PipelineClock",

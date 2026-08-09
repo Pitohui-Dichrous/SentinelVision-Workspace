@@ -4,7 +4,7 @@
 # exact legacy behavior until an operator explicitly enables PPE temporal mode.
 # Values below are engineering starting points for controlled experiments, not
 # industrial standards or certified safety thresholds.
-schema_version: 2
+schema_version: 3
 default_mode: baseline
 
 ppe:
@@ -26,15 +26,31 @@ ppe:
       value: 1.00
     tentative_loss_tolerance:
       unit: seconds
-      value: 0.40
+      value: 0.30
+    admission:
+      # Low-confidence detections may only continue an established public
+      # track.  They never create a new candidate or count as alert evidence.
+      association_min_confidence: 0.20
+      new_candidate_min_confidence: 0.45
+      max_tentative_candidates: 128
+    publication:
+      min_duration_seconds: 0.20
+      min_ema_confidence: 0.50
+      ema_alpha: 0.35
     reacquisition:
       enabled: true
       min_iou: 0.10
-      max_center_distance_ratio: 0.65
+      max_center_distance_ratio: 0.80
       min_area_ratio: 0.65
       ambiguity_margin: 0.10
-      motion_max_seconds: 0.50
+      motion_max_seconds: 0.85
       velocity_alpha: 0.65
+      motion_model: alpha_beta
+      position_gain: 0.75
+      velocity_gain: 0.20
+      velocity_decay_per_second: 0.35
+      min_velocity_dt_seconds: 0.02
+      max_center_speed_ratio: 8.0
     public_id_policy: confirmed_only
 
   temporal:
@@ -51,3 +67,23 @@ ppe:
     confirm_frames: 2
     recovery_frames: 4
     cooldown_seconds: 10.0
+    verification:
+      min_violation_seconds: 0.80
+      min_stable_confidence: 0.50
+      min_stability: 0.65
+      max_evidence_gap_seconds: 0.35
+
+# Enhanced mode also protects Fire and future alert-enabled classes with a
+# per-track real-evidence gate.  Predicted/missing boxes never contribute.
+alert_validation:
+  enabled: true
+  defaults:
+    min_high_confidence_hits: 4
+    min_duration_seconds: 0.60
+    window_seconds: 1.20
+    max_gap_seconds: 0.25
+    min_presence_ratio: 0.60
+    min_ema_confidence: 0.45
+    ema_alpha: 0.35
+    cooldown_seconds: 10.0
+    max_active_events: 128

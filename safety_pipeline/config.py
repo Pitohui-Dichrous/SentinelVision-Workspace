@@ -118,6 +118,20 @@ class TrackingConfig:
     motion_max_seconds: float = 0.50
     velocity_alpha: float = 0.65
     public_id_policy: str = "confirmed_only"
+    # Schema-v3 hardening.  The zero/legacy defaults intentionally preserve
+    # the schema-v1/v2 contracts used by existing experiment configurations.
+    motion_model: str = "legacy"
+    position_gain: float = 0.75
+    velocity_gain: float = 0.20
+    velocity_decay_per_second: float = 0.35
+    min_velocity_dt_seconds: float = 0.02
+    max_center_speed_ratio: float = 8.0
+    max_tentative_candidates: int = 0
+    association_min_confidence: float = 0.0
+    new_candidate_min_confidence: float = 0.0
+    publication_min_seconds: float = 0.0
+    publication_min_confidence: float = 0.0
+    confidence_alpha: float = 0.35
 
     @classmethod
     def from_mapping(cls, value: Any, schema_version: int = 2) -> "TrackingConfig":
@@ -160,7 +174,7 @@ class TrackingConfig:
         tentative_max_lost_seconds = _number(tentative_loss, "value", 0.40, 0.0, 10.0)
         if tentative_max_lost_seconds > max_lost_seconds:
             raise ConfigError("tentative loss tolerance cannot exceed confirmed loss tolerance")
-        return cls(
+        result = cls(
             **common,
             max_lost_frames=None,
             max_lost_seconds=max_lost_seconds,
@@ -179,6 +193,57 @@ class TrackingConfig:
             motion_max_seconds=_number(reacquire, "motion_max_seconds", 0.50, 0.0, 10.0),
             velocity_alpha=_number(reacquire, "velocity_alpha", 0.65, 0.0, 1.0),
             public_id_policy=public_id_policy,
+        )
+        if schema_version < 3:
+            return result
+
+        admission = _mapping(data.get("admission"), "ppe.tracking.admission")
+        publication = _mapping(data.get("publication"), "ppe.tracking.publication")
+        motion_model = _text(reacquire, "motion_model", "alpha_beta")
+        if motion_model != "alpha_beta":
+            raise ConfigError(
+                "schema 3 requires ppe.tracking.reacquisition.motion_model=alpha_beta; "
+                "use reacquisition.enabled=false or baseline mode for a rollback"
+            )
+        association_min_confidence = _number(
+            admission, "association_min_confidence", 0.20, 0.0, 1.0
+        )
+        new_candidate_min_confidence = _number(
+            admission, "new_candidate_min_confidence", 0.45, 0.0, 1.0
+        )
+        if association_min_confidence > new_candidate_min_confidence:
+            raise ConfigError(
+                "ppe.tracking.admission.association_min_confidence cannot exceed "
+                "new_candidate_min_confidence"
+            )
+        return replace(
+            result,
+            motion_model=motion_model,
+            position_gain=_number(reacquire, "position_gain", 0.75, 0.0, 1.0),
+            velocity_gain=_number(reacquire, "velocity_gain", 0.20, 0.0, 1.0),
+            velocity_decay_per_second=_number(
+                reacquire, "velocity_decay_per_second", 0.35, 0.0, 10.0
+            ),
+            min_velocity_dt_seconds=_number(
+                reacquire, "min_velocity_dt_seconds", 0.02, 0.001, 1.0
+            ),
+            max_center_speed_ratio=_number(
+                reacquire, "max_center_speed_ratio", 8.0, 0.1, 100.0
+            ),
+            max_tentative_candidates=_integer(
+                admission, "max_tentative_candidates", 128, 1
+            ),
+            association_min_confidence=association_min_confidence,
+            new_candidate_min_confidence=new_candidate_min_confidence,
+            publication_min_seconds=_number(
+                publication, "min_duration_seconds", 0.20, 0.0, 30.0
+            ),
+            publication_min_confidence=_number(
+                publication, "min_ema_confidence", 0.50, 0.0, 1.0
+            ),
+            confidence_alpha=_number(
+                publication, "ema_alpha", 0.35, 0.0, 1.0
+            ),
         )
 
 
@@ -215,16 +280,98 @@ class RiskConfig:
     confirm_frames: int = 2
     recovery_frames: int = 4
     cooldown_seconds: float = 10.0
+    min_violation_seconds: float = 0.0
+    min_stable_confidence: float = 0.0
+    min_stability: float = 0.0
+    max_evidence_gap_seconds: Optional[float] = None
 
     @classmethod
-    def from_mapping(cls, value: Any) -> "RiskConfig":
+    def from_mapping(cls, value: Any, schema_version: int = 2) -> "RiskConfig":
         data = _mapping(value, "ppe.risk")
-        return cls(
+        result = cls(
             suspect_frames=_integer(data, "suspect_frames", cls.suspect_frames, 1),
             confirm_frames=_integer(data, "confirm_frames", cls.confirm_frames, 1),
             recovery_frames=_integer(data, "recovery_frames", cls.recovery_frames, 1),
             cooldown_seconds=_number(data, "cooldown_seconds", cls.cooldown_seconds, 0.0),
         )
+        if schema_version < 3:
+            return result
+        verification = _mapping(data.get("verification"), "ppe.risk.verification")
+        return replace(
+            result,
+            min_violation_seconds=_number(
+                verification, "min_violation_seconds", 0.80, 0.0, 60.0
+            ),
+            min_stable_confidence=_number(
+                verification, "min_stable_confidence", 0.50, 0.0, 1.0
+            ),
+            min_stability=_number(
+                verification, "min_stability", 0.65, 0.0, 1.0
+            ),
+            max_evidence_gap_seconds=_number(
+                verification, "max_evidence_gap_seconds", 0.35, 0.001, 60.0
+            ),
+        )
+
+
+@dataclass(frozen=True)
+class AlertValidationConfig:
+    """Evidence gate for non-PPE alert classes in enhanced mode.
+
+    It is disabled for schema v1/v2 so historical experiment replays remain
+    reproducible.  Schema v3 enables it explicitly through the tracked YAML.
+    """
+
+    enabled: bool = False
+    min_high_confidence_hits: int = 4
+    min_duration_seconds: float = 0.60
+    window_seconds: float = 1.20
+    max_gap_seconds: float = 0.25
+    min_presence_ratio: float = 0.60
+    min_ema_confidence: float = 0.45
+    ema_alpha: float = 0.35
+    cooldown_seconds: float = 10.0
+    max_active_events: int = 128
+
+    @classmethod
+    def from_mapping(cls, value: Any, schema_version: int = 2) -> "AlertValidationConfig":
+        if schema_version < 3:
+            return cls(enabled=False)
+        root = _mapping(value, "alert_validation")
+        data = _mapping(root.get("defaults"), "alert_validation.defaults")
+        result = cls(
+            enabled=_boolean(root, "enabled", True),
+            min_high_confidence_hits=_integer(
+                data, "min_high_confidence_hits", cls.min_high_confidence_hits, 2
+            ),
+            min_duration_seconds=_number(
+                data, "min_duration_seconds", cls.min_duration_seconds, 0.01, 60.0
+            ),
+            window_seconds=_number(
+                data, "window_seconds", cls.window_seconds, 0.05, 120.0
+            ),
+            max_gap_seconds=_number(
+                data, "max_gap_seconds", cls.max_gap_seconds, 0.001, 60.0
+            ),
+            min_presence_ratio=_number(
+                data, "min_presence_ratio", cls.min_presence_ratio, 0.0, 1.0
+            ),
+            min_ema_confidence=_number(
+                data, "min_ema_confidence", cls.min_ema_confidence, 0.0, 1.0
+            ),
+            ema_alpha=_number(data, "ema_alpha", cls.ema_alpha, 0.0, 1.0),
+            cooldown_seconds=_number(
+                data, "cooldown_seconds", cls.cooldown_seconds, 0.0, 3600.0
+            ),
+            max_active_events=_integer(
+                data, "max_active_events", cls.max_active_events, 1
+            ),
+        )
+        if result.max_gap_seconds > result.window_seconds:
+            raise ConfigError("alert_validation.defaults.max_gap_seconds cannot exceed window_seconds")
+        if result.min_duration_seconds > result.window_seconds:
+            raise ConfigError("alert_validation.defaults.min_duration_seconds cannot exceed window_seconds")
+        return result
 
 
 @dataclass(frozen=True)
@@ -235,12 +382,13 @@ class SafetyPipelineConfig:
     tracking: TrackingConfig = TrackingConfig()
     temporal: TemporalConfig = TemporalConfig()
     risk: RiskConfig = RiskConfig()
+    alert_validation: AlertValidationConfig = AlertValidationConfig()
 
     @classmethod
     def from_mapping(cls, value: Any) -> "SafetyPipelineConfig":
         data = _mapping(value, "root")
         schema_version = _integer(data, "schema_version", cls.schema_version, 1)
-        if schema_version not in (1, 2):
+        if schema_version not in (1, 2, 3):
             raise ConfigError("unsupported safety pipeline schema_version: %s" % schema_version)
         default_mode = _text(data, "default_mode", cls.default_mode)
         if default_mode not in SUPPORTED_MODES:
@@ -252,7 +400,10 @@ class SafetyPipelineConfig:
             conflict=PPEConflictConfig.from_mapping(ppe.get("conflict")),
             tracking=TrackingConfig.from_mapping(ppe.get("tracking"), schema_version=schema_version),
             temporal=TemporalConfig.from_mapping(ppe.get("temporal")),
-            risk=RiskConfig.from_mapping(ppe.get("risk")),
+            risk=RiskConfig.from_mapping(ppe.get("risk"), schema_version=schema_version),
+            alert_validation=AlertValidationConfig.from_mapping(
+                data.get("alert_validation"), schema_version=schema_version
+            ),
         )
 
     def with_mode(self, mode: str) -> "SafetyPipelineConfig":
@@ -297,5 +448,33 @@ def load_safety_pipeline_config_checked(
 
 
 def config_fingerprint(config: SafetyPipelineConfig) -> str:
-    payload = json.dumps(asdict(config), ensure_ascii=True, sort_keys=True, separators=(",", ":"))
+    document = asdict(config)
+    if config.schema_version < 3:
+        # Preserve the exact schema-v1/v2 experiment fingerprint contract.
+        # Neutral hardening fields were added to the Python dataclasses only;
+        # they must not make an unchanged historical configuration appear new.
+        for key in (
+            "motion_model",
+            "position_gain",
+            "velocity_gain",
+            "velocity_decay_per_second",
+            "min_velocity_dt_seconds",
+            "max_center_speed_ratio",
+            "max_tentative_candidates",
+            "association_min_confidence",
+            "new_candidate_min_confidence",
+            "publication_min_seconds",
+            "publication_min_confidence",
+            "confidence_alpha",
+        ):
+            document["tracking"].pop(key, None)
+        for key in (
+            "min_violation_seconds",
+            "min_stable_confidence",
+            "min_stability",
+            "max_evidence_gap_seconds",
+        ):
+            document["risk"].pop(key, None)
+        document.pop("alert_validation", None)
+    payload = json.dumps(document, ensure_ascii=True, sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()

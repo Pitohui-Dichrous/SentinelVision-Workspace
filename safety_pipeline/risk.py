@@ -29,6 +29,10 @@ class _RiskTrack:
     cooldown_until: float = 0.0
     last_alert_at: float = float("-inf")
     event_alerted: bool = False
+    qualification_started_at: Optional[float] = None
+    last_eligible_at: Optional[float] = None
+    evidence_hits: int = 0
+    evidence_stability: float = 0.0
 
 
 @dataclass(frozen=True)
@@ -48,6 +52,7 @@ class PPERiskStateMachine:
         self.suppressed_transients = 0
         self.confirmed_events = 0
         self.alerts_emitted = 0
+        self.evidence_gap_resets = 0
 
     def reset(self, session_id: str) -> None:
         self.session_id = session_id
@@ -55,6 +60,7 @@ class PPERiskStateMachine:
         self.suppressed_transients = 0
         self.confirmed_events = 0
         self.alerts_emitted = 0
+        self.evidence_gap_resets = 0
 
     def state_for(self, candidate_id: int) -> RiskState:
         """Return state from the private tracker-candidate namespace."""
@@ -83,14 +89,33 @@ class PPERiskStateMachine:
             ),
         )
 
-    def observe_raw(self, candidate_id: int, raw_state: PPEState, timestamp: float) -> None:
+    def observe_raw(
+        self,
+        candidate_id: int,
+        raw_state: PPEState,
+        timestamp: float,
+        eligible: bool = True,
+    ) -> None:
         """Record pre-confirmation evidence without advancing the risk state."""
 
         track = self._tracks.setdefault(candidate_id, _RiskTrack())
-        if raw_state == PPEState.NO_HELMET and track.raw_first_seen is None:
-            track.raw_first_seen = timestamp
+        if not eligible:
+            return
+        if raw_state == PPEState.NO_HELMET:
+            if track.raw_first_seen is None:
+                track.raw_first_seen = timestamp
         elif raw_state == PPEState.HELMET and track.state == RiskState.NORMAL:
             track.raw_first_seen = None
+
+    def observe_gap(self, candidate_id: int, timestamp: float) -> Tuple[StateTransition, ...]:
+        """Advance wall/video time without treating a missing prediction as evidence."""
+
+        track = self._tracks.get(candidate_id)
+        if track is None or not self._evidence_gap_expired(track, timestamp):
+            return ()
+        self._reset_evidence_progress(track)
+        self.evidence_gap_resets += 1
+        return ()
 
     def update(
         self,
@@ -103,14 +128,51 @@ class PPERiskStateMachine:
         raw_state: PPEState = PPEState.UNKNOWN,
         alerts_enabled: bool = True,
         public_track_id: Optional[int] = None,
+        stability: float = 1.0,
+        evidence_eligible: bool = True,
+        raw_evidence_eligible: bool = True,
     ) -> RiskUpdate:
         track = self._tracks.setdefault(candidate_id, _RiskTrack())
         track_id = self._bind_public_track_id(candidate_id, track, public_track_id)
         alerts: List[PipelineAlert] = []
         transitions: List[StateTransition] = []
-        violating = stable_state == PPEState.NO_HELMET
-        recovered = stable_state == PPEState.HELMET
-        self.observe_raw(candidate_id, raw_state, timestamp)
+        confidence = max(0.0, min(1.0, float(confidence)))
+        stability = max(0.0, min(1.0, float(stability)))
+        evidence_quality_ok = bool(evidence_eligible) and (
+            confidence >= self.config.min_stable_confidence
+            and stability >= self.config.min_stability
+        )
+        if (
+            self.config.min_stable_confidence > 0.0
+            or self.config.min_stability > 0.0
+        ) and raw_state != stable_state:
+            evidence_quality_ok = False
+        violating = stable_state == PPEState.NO_HELMET and evidence_quality_ok
+        recovered = stable_state == PPEState.HELMET and evidence_quality_ok
+        self.observe_raw(
+            candidate_id,
+            raw_state,
+            timestamp,
+            eligible=bool(raw_evidence_eligible),
+        )
+
+        if not evidence_quality_ok:
+            self.observe_gap(candidate_id, timestamp)
+            return RiskUpdate(track.state, (), ())
+
+        # A gap never manufactures a recovery or discards Event/Cooldown.  It
+        # only invalidates consecutive qualification progress.
+        self.observe_gap(candidate_id, timestamp)
+        track.last_eligible_at = timestamp
+        if violating:
+            if track.qualification_started_at is None:
+                track.qualification_started_at = timestamp
+            track.evidence_hits += 1
+            track.evidence_stability = stability
+        elif recovered:
+            track.qualification_started_at = None
+            track.evidence_hits = 0
+            track.evidence_stability = stability
 
         if track.state == RiskState.NORMAL:
             if violating:
@@ -127,7 +189,11 @@ class PPERiskStateMachine:
             if violating:
                 track.recovery_frames = 0
                 track.suspect_frames += 1
-                if track.suspect_frames >= self.config.confirm_frames:
+                duration = self._violation_duration(track, timestamp)
+                if (
+                    track.suspect_frames >= self.config.confirm_frames
+                    and duration + 1e-12 >= self.config.min_violation_seconds
+                ):
                     track.confirmed_at = timestamp
                     track.episode_sequence += 1
                     track.event_id = "%s-ppe-%04d-%03d" % (
@@ -212,6 +278,28 @@ class PPERiskStateMachine:
 
         return RiskUpdate(track.state, tuple(alerts), tuple(transitions))
 
+    def _evidence_gap_expired(self, track: _RiskTrack, timestamp: float) -> bool:
+        limit = self.config.max_evidence_gap_seconds
+        if limit is None or track.last_eligible_at is None:
+            return False
+        return timestamp - track.last_eligible_at > limit + 1e-12
+
+    @staticmethod
+    def _violation_duration(track: _RiskTrack, timestamp: float) -> float:
+        if track.qualification_started_at is None:
+            return 0.0
+        return max(0.0, timestamp - track.qualification_started_at)
+
+    @staticmethod
+    def _reset_evidence_progress(track: _RiskTrack) -> None:
+        track.violation_frames = 0
+        track.suspect_frames = 0
+        track.recovery_frames = 0
+        track.qualification_started_at = None
+        track.last_eligible_at = None
+        track.evidence_hits = 0
+        track.evidence_stability = 0.0
+
     @staticmethod
     def _bind_public_track_id(
         candidate_id: int,
@@ -272,6 +360,10 @@ class PPERiskStateMachine:
             source_model_ids=source_model_ids,
             stable_state=stable_state,
             risk_state=RiskState.ALARMED,
+            evidence_hits=track.evidence_hits,
+            evidence_duration=self._violation_duration(track, timestamp),
+            evidence_stability=track.evidence_stability,
+            decision_reason="verified_temporal_evidence",
         ))
         self.alerts_emitted += 1
 
@@ -317,3 +409,7 @@ class PPERiskStateMachine:
         track.confirmed_at = None
         track.alarmed_at = None
         track.event_alerted = False
+        track.qualification_started_at = None
+        track.last_eligible_at = None
+        track.evidence_hits = 0
+        track.evidence_stability = 0.0

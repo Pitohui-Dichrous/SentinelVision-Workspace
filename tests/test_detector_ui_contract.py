@@ -4,6 +4,7 @@ import os
 import json
 import tempfile
 import unittest
+from dataclasses import replace
 from pathlib import Path
 from unittest import mock
 
@@ -170,6 +171,35 @@ class DetectorUIContractTests(unittest.TestCase):
         self.assertEqual(worker.last_alert_at[("camera-01", "fire")], 12.0)
         self.assertNotIn(("camera-01", "person"), worker.last_alert_at)
 
+    def test_production_policy_changes_request_the_correct_reset_scope(self):
+        worker = SentinelVision4.VideoWorker(
+            SentinelVision4.CATALOG_SNAPSHOT,
+            SentinelVision4.SAFETY_PIPELINE_DEFAULTS,
+        )
+        worker.safety_mode = "ppe_temporal"
+
+        ppe_values = dict(worker.class_enabled)
+        ppe_values[worker.safety_config.conflict.protected_class_id] = not bool(
+            ppe_values.get(worker.safety_config.conflict.protected_class_id, True)
+        )
+        worker.configure_classes(ppe_values)
+        self.assertTrue(worker._pipeline_reset_requested)
+        self.assertFalse(worker._full_pipeline_reset_requested)
+
+        worker._pipeline_reset_requested = False
+        generic_values = dict(worker.class_enabled)
+        generic_values["fire"] = not bool(generic_values.get("fire", True))
+        worker.configure_classes(generic_values)
+        self.assertTrue(worker._full_pipeline_reset_requested)
+
+        worker._full_pipeline_reset_requested = False
+        rois = [[(0, 0), (100, 0), (100, 100)]]
+        worker.configure_polys(rois, [])
+        self.assertTrue(worker._full_pipeline_reset_requested)
+        worker._full_pipeline_reset_requested = False
+        worker.configure_polys(rois, [])
+        self.assertFalse(worker._full_pipeline_reset_requested)
+
     def test_public_track_session_is_preserved_in_alert_and_review_journal(self):
         worker = SentinelVision4.VideoWorker(
             SentinelVision4.CATALOG_SNAPSHOT,
@@ -205,6 +235,106 @@ class DetectorUIContractTests(unittest.TestCase):
         self.assertEqual(review_record.args[0], "human_review")
         self.assertEqual(review_record.args[1]["session_id"], "session-a")
         self.assertEqual(review_record.args[1]["track_id"], 1)
+
+    def test_hardened_legacy_tracker_does_not_turn_a_miss_into_evidence(self):
+        worker = SentinelVision4.VideoWorker(
+            SentinelVision4.CATALOG_SNAPSHOT,
+            SentinelVision4.SAFETY_PIPELINE_DEFAULTS,
+        )
+        detection = {
+            "cls": "fire",
+            "conf": 0.95,
+            "box": (0.0, 0.0, 40.0, 40.0),
+            "model_ids": ("fire",),
+        }
+        worker._update_tracks((detection,), hardened=True)
+        self.assertEqual(worker.tracks[0]["hits"], 1)
+        self.assertTrue(worker.tracks[0]["updated"])
+
+        worker._update_tracks((), hardened=True)
+
+        self.assertFalse(worker.tracks[0]["updated"])
+        self.assertFalse(worker.tracks[0]["evidence_eligible"])
+        self.assertEqual(worker.tracks[0]["hits"], 1)
+
+    def test_hardened_legacy_tracker_uses_low_confidence_only_after_confirmation(self):
+        worker = SentinelVision4.VideoWorker(
+            SentinelVision4.CATALOG_SNAPSHOT,
+            SentinelVision4.SAFETY_PIPELINE_DEFAULTS,
+        )
+        high = {
+            "cls": "fire", "conf": 0.90, "box": (0.0, 0.0, 40.0, 40.0),
+            "model_ids": ("fire",),
+        }
+        low = {
+            "cls": "fire", "conf": 0.30, "box": (2.0, 0.0, 42.0, 40.0),
+            "model_ids": ("fire",),
+        }
+        worker._update_tracks((low,), hardened=True)
+        self.assertEqual(worker.tracks, [])
+        worker._update_tracks((high,), hardened=True)
+        worker._update_tracks((high,), hardened=True)
+        hits = worker.tracks[0]["hits"]
+
+        worker._update_tracks((low,), hardened=True)
+
+        self.assertEqual(worker.tracks[0]["hits"], hits)
+        self.assertTrue(worker.tracks[0]["updated"])
+        self.assertFalse(worker.tracks[0]["evidence_eligible"])
+
+    def test_production_inference_floor_preserves_low_confidence_association_band(self):
+        worker = SentinelVision4.VideoWorker(
+            SentinelVision4.CATALOG_SNAPSHOT,
+            SentinelVision4.SAFETY_PIPELINE_DEFAULTS,
+        )
+        association_floor = worker.safety_config.tracking.association_min_confidence
+
+        self.assertEqual(
+            worker._inference_confidence_floor(0.60, "ppe_temporal"),
+            association_floor,
+        )
+        self.assertEqual(worker._inference_confidence_floor(0.60, "baseline"), 0.60)
+
+        medium = {
+            "cls": "fire", "conf": 0.55, "box": (0.0, 0.0, 40.0, 40.0),
+            "model_ids": ("fire",),
+        }
+        worker._update_tracks(
+            (medium,),
+            hardened=True,
+            high_confidence_threshold=0.60,
+        )
+        self.assertEqual(worker.tracks, [])
+
+    def test_disabled_generic_gate_does_not_disable_production_confidence_filter(self):
+        config = replace(
+            SentinelVision4.SAFETY_PIPELINE_DEFAULTS,
+            alert_validation=replace(
+                SentinelVision4.SAFETY_PIPELINE_DEFAULTS.alert_validation,
+                enabled=False,
+            ),
+        )
+        worker = SentinelVision4.VideoWorker(
+            SentinelVision4.CATALOG_SNAPSHOT,
+            config,
+        )
+        self.assertTrue(worker._production_temporal_enabled("ppe_temporal"))
+        self.assertFalse(worker.safety_config.alert_validation.enabled)
+        self.assertEqual(
+            worker._inference_confidence_floor(0.60, "ppe_temporal"),
+            config.tracking.association_min_confidence,
+        )
+
+        medium = {
+            "cls": "fire", "conf": 0.30, "box": (0.0, 0.0, 40.0, 40.0),
+            "model_ids": ("fire",),
+        }
+        worker._update_tracks(
+            (medium,),
+            hardened=worker._production_temporal_enabled("ppe_temporal"),
+            high_confidence_threshold=0.60,
+        )
+        self.assertEqual(worker.tracks, [])
 
 
 if __name__ == "__main__":

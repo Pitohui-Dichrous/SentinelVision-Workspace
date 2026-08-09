@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+from collections import deque
+import math
+import time
 import uuid
 from typing import Iterable, List, Optional
 
@@ -42,6 +45,7 @@ class PPETemporalPipeline:
         self._conflicts_resolved = 0
         self._uncertain_observations = 0
         self._stable_state_changes = 0
+        self._pipeline_times_ms = deque(maxlen=120)
 
     @staticmethod
     def _new_session_id() -> str:
@@ -58,6 +62,7 @@ class PPETemporalPipeline:
         self._conflicts_resolved = 0
         self._uncertain_observations = 0
         self._stable_state_changes = 0
+        self._pipeline_times_ms.clear()
 
     def resolve(self, detections: Iterable[object]) -> ResolutionFrame:
         return self.resolver.resolve(detections, enabled=True)
@@ -85,10 +90,19 @@ class PPETemporalPipeline:
         resolution: ResolutionFrame,
         timestamp: float,
         alerts_enabled: bool = True,
+        high_confidence_threshold: Optional[float] = None,
     ) -> PipelineFrame:
+        started_at = time.perf_counter()
         items = tuple(ppe_detections)
         observations = tuple(item.head_observation for item in items)
-        tracker_frame = self.tracker.update(observations, timestamp)
+        if high_confidence_threshold is None:
+            tracker_frame = self.tracker.update(observations, timestamp)
+        else:
+            tracker_frame = self.tracker.update(
+                observations,
+                timestamp,
+                high_confidence_threshold=high_confidence_threshold,
+            )
         self._frames_processed += 1
         self._raw_ppe_detections += resolution.ppe_raw_count
         self._head_observations += resolution.head_count
@@ -100,6 +114,7 @@ class PPETemporalPipeline:
         detections: List[PipelineDetection] = []
         for candidate_id in tracker_frame.missing_candidate_ids:
             self.temporal.update_missing(candidate_id)
+            transitions.extend(self.risk.observe_gap(candidate_id, timestamp))
         for candidate_id in tracker_frame.retired_candidate_ids:
             self.temporal.remove(candidate_id)
             transitions.extend(self.risk.remove(candidate_id, timestamp))
@@ -109,13 +124,53 @@ class PPETemporalPipeline:
         uncertain_id = self.config.conflict.uncertain_class_id
         for tracked in tracker_frame.visible:
             candidate_id = tracked.candidate_id
-            estimate = self.temporal.update(candidate_id, tracked.observation)
-            self.risk.observe_raw(candidate_id, estimate.raw_state, timestamp)
+            if tracked.evidence_eligible:
+                estimate = self.temporal.update(candidate_id, tracked.observation)
+            else:
+                estimate = self.temporal.snapshot(
+                    candidate_id,
+                    tracked.observation.state,
+                    tracked.observation.confidence,
+                )
             if estimate.changed:
                 self._stable_state_changes += 1
-            if tracked.confirmed:
-                if tracked.track_id is None:
-                    raise RuntimeError("confirmed tracker candidate has no public track ID")
+
+            hardened = self.config.schema_version >= 3
+            if estimate.raw_state == PPEState.NO_HELMET:
+                current_support = float(tracked.observation.nohelmet_score or 0.0)
+            elif estimate.raw_state == PPEState.HELMET:
+                current_support = float(tracked.observation.helmet_score or 0.0)
+            else:
+                current_support = 0.0
+            raw_origin_eligible = (
+                not hardened
+                or (
+                    tracked.evidence_eligible
+                    and estimate.raw_state in (PPEState.HELMET, PPEState.NO_HELMET)
+                    and current_support + 1e-12
+                    >= self.config.risk.min_stable_confidence
+                )
+            )
+            self.risk.observe_raw(
+                candidate_id,
+                estimate.raw_state,
+                timestamp,
+                eligible=raw_origin_eligible,
+            )
+            evidence_eligible = (
+                not hardened
+                or (
+                    tracked.evidence_eligible
+                    and estimate.stable_state in (PPEState.HELMET, PPEState.NO_HELMET)
+                    and estimate.raw_state == estimate.stable_state
+                    and current_support + 1e-12
+                    >= self.config.risk.min_stable_confidence
+                    and estimate.stable_confidence + 1e-12
+                    >= self.config.risk.min_stable_confidence
+                    and estimate.stability + 1e-12 >= self.config.risk.min_stability
+                )
+            )
+            if tracked.confirmed and tracked.track_id is not None:
                 risk_update = self.risk.update(
                     candidate_id=candidate_id,
                     stable_state=estimate.stable_state,
@@ -126,12 +181,17 @@ class PPETemporalPipeline:
                     raw_state=estimate.raw_state,
                     alerts_enabled=alerts_enabled,
                     public_track_id=tracked.track_id,
+                    stability=estimate.stability,
+                    evidence_eligible=evidence_eligible,
+                    raw_evidence_eligible=raw_origin_eligible,
                 )
                 risk_state = risk_update.state
                 alerts.extend(risk_update.alerts)
                 transitions.extend(risk_update.transitions)
             else:
                 risk_state = RiskState.NORMAL
+                if not evidence_eligible:
+                    transitions.extend(self.risk.observe_gap(candidate_id, timestamp))
 
             # Schema v2 keeps tentative candidates private.  Schema v1's
             # immediate policy still supplies a public ID before confirmation,
@@ -164,6 +224,11 @@ class PPETemporalPipeline:
                 head_observation=tracked.observation,
             ))
 
+        elapsed_ms = max(0.0, (time.perf_counter() - started_at) * 1000.0)
+        self._pipeline_times_ms.append(elapsed_ms)
+        ordered_times = sorted(self._pipeline_times_ms)
+        p95_index = max(0, math.ceil(len(ordered_times) * 0.95) - 1)
+        tracker_stats = getattr(self.tracker, "stats", {})
         metrics = PipelineMetrics(
             session_id=self.session_id,
             mode="ppe_temporal",
@@ -178,6 +243,23 @@ class PPETemporalPipeline:
             alerts_emitted=self.risk.alerts_emitted,
             active_tracks=self.tracker.active_count,
             active_candidates=self.tracker.candidate_count,
+            candidates_created=int(tracker_stats.get("created", 0)),
+            candidates_promoted=int(tracker_stats.get("promoted", 0)),
+            tentative_retired=int(tracker_stats.get("tentative_retired", 0)),
+            confirmed_retired=int(tracker_stats.get("confirmed_retired", 0)),
+            admission_dropped=int(tracker_stats.get("capacity_dropped", 0)),
+            low_confidence_filtered=int(tracker_stats.get("low_confidence_dropped", 0)),
+            invalid_observations=int(tracker_stats.get("invalid", 0)),
+            high_water_candidates=int(tracker_stats.get("highwater", 0)),
+            strict_matches=int(tracker_stats.get("strict", 0)),
+            reacquire_attempts=int(tracker_stats.get("reacquire_attempts", 0)),
+            reacquire_successes=int(
+                tracker_stats.get("reacquire_successes", tracker_stats.get("reacquire", 0))
+            ),
+            ambiguity_rejections=int(tracker_stats.get("ambiguity", 0)),
+            pipeline_ms_last=elapsed_ms,
+            pipeline_ms_p95=ordered_times[p95_index],
+            pipeline_ms_max=max(ordered_times),
         )
         return PipelineFrame(
             detections=tuple(detections),

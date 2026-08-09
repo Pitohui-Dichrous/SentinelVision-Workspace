@@ -23,14 +23,15 @@ YOLOv5
 ```text
 同一 YOLOv5 detection
 + PPEConflictResolver
-+ 类别无关 HeadTracker（严格关联 + 短时重关联）
-+ confirmed-only 公开 Track 编号
-+ N-of-M / EMA / missing tolerance / hysteresis
++ 类别无关 HeadTracker（严格关联 + 受限 Alpha-Beta 预测重捕获 + 歧义拒绝）
++ 高低置信双阈值；低置信结果只允许续接已公开目标
++ 命中数 / 持续时间 / EMA 达标后才分配公开 Track 编号
++ N-of-M / EMA / missing tolerance / evidence duration / hysteresis
 + 每 Track 风险状态机
 + 每 episode Event ID
 ```
 
-Fire 在本阶段不进入 Proposed 对比，仍使用现有路径，避免把不同问题混入 PPE 实验。
+Fire 等非 PPE 告警类在生产模式下已有按 Track 的通用时序证据门禁，但不进入本阶段 PPE Proposed 主对比，避免把不同问题混入同一实验。专用 FireTemporalVerifier 仍需另设空间聚类、形变和持续时间实验。
 
 ## 控制变量
 
@@ -62,6 +63,10 @@ Fire 在本阶段不进入 Proposed 对比，仍使用现有路径，避免把�
 6. ROI 边缘经过；
 7. 夜间、模糊、逆光和特殊角度；
 8. 从未戴帽恢复为戴帽，再次违规。
+9. 静态背景物体产生 1–8 个高置信短闪误检；
+10. 低置信框只能续接已有目标，不能单独形成候选或告警；
+11. 匀速移动目标短暂丢失后，在预测窗口内回归；
+12. 两人交叉、预测关系含糊、框尺寸抖动和异常短帧间隔。
 
 ground truth 不能只标“这段视频有违规”，至少应包含：
 
@@ -99,7 +104,7 @@ ground truth 不能只标“这段视频有违规”，至少应包含：
 | False inheritance rate | 新主体错误继承旧公开 Track / 风险状态的次数 | 主体标注与关联 trace |
 | Reacquisition success rate | 短时丢失后正确继承旧 Track 的次数 / 可重关联案例 | 丢失区间与主体标注 |
 
-当前 UI 已实时显示处理帧数、活动公开 Track、已消解冲突和 Event 数；事件导出包含 Session/Track/Event、稳定状态、风险状态与确认延迟；`.runtime/events/ppe_events.jsonl` 可追踪状态转换和人工结论。统计必须先按 `session_id` 分组，不能把不同会话中相同的裸 `track_id` 当成同一目标。
+当前 UI 已实时显示处理帧数、活动公开 Track、候选数、重捕获、歧义拒绝、过滤/拒绝数和管线 p95；事件导出包含 Session/Track/Event、稳定状态、风险状态、确认延迟与证据摘要；`.runtime/events/ppe_events.jsonl` 可追踪状态转换和人工结论。统计必须先按 `session_id` 分组，不能把不同会话中相同的裸 `track_id` 当成同一目标。在线候选退休数只能视为噪声代理指标，不能在没有人工标注时直接宣称为 false positive。
 
 False alarm 需要人工复核；Missed event rate 必须依赖独立 ground truth。不得把“没有触发告警”自动当成正确负样本。
 
@@ -122,6 +127,10 @@ False alarm 需要人工复核；Missed event rate 必须依赖独立 ground tru
 - 超过保留时间后重现会获得新 Track ID；
 - 多个旧 Track 对同一观测关系含糊时拒绝继承；
 - 单帧候选误检不显示也不消耗公开编号，首个确认目标仍是 `Track #1`；
+- 单帧或不足持续时间的高置信短闪不产生告警；持续低置信噪声既不能创建新候选，也不能推进风险证据；
+- 缺失框、预测框和 coasting 状态只用于关联或显示，不计入命中数、持续时间和告警证据；
+- 移动目标在预测窗口内回归且关系唯一时继承原 Track/Event/Cooldown，超窗、瞬移或多人歧义时拒绝继承；
+- 候选洪泛受确定性容量上限约束，不驱逐已确认目标，并在调试统计中显式记录拒绝数；
 - 在固定真实丢失时长下，不同 `DETECT_EVERY_N` 使用相同秒制退休边界，但证据采样率仍作为控制变量固定；
 - 单帧错误不翻转稳定状态；
 - Track 17 在冷却时，Track 26 可独立报警；

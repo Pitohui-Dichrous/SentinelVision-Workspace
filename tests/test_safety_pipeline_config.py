@@ -129,6 +129,92 @@ class SafetyPipelineConfigTests(unittest.TestCase):
         })
         self.assertNotEqual(config_fingerprint(original), config_fingerprint(changed))
 
+    def test_schema_three_enables_bounded_motion_and_alert_validation(self):
+        config = SafetyPipelineConfig.from_mapping({
+            "schema_version": 3,
+            "default_mode": "ppe_temporal",
+            "ppe": {
+                "tracking": {
+                    "admission": {
+                        "association_min_confidence": 0.2,
+                        "new_candidate_min_confidence": 0.45,
+                        "max_tentative_candidates": 64,
+                    },
+                    "publication": {
+                        "min_duration_seconds": 0.2,
+                        "min_ema_confidence": 0.5,
+                    },
+                    "reacquisition": {"motion_model": "alpha_beta"},
+                },
+                "risk": {
+                    "verification": {
+                        "min_violation_seconds": 0.8,
+                        "min_stable_confidence": 0.5,
+                        "min_stability": 0.65,
+                        "max_evidence_gap_seconds": 0.35,
+                    },
+                },
+            },
+            "alert_validation": {"enabled": True, "defaults": {}},
+        })
+        self.assertEqual(config.schema_version, 3)
+        self.assertEqual(config.tracking.motion_model, "alpha_beta")
+        self.assertEqual(config.tracking.max_tentative_candidates, 64)
+        self.assertEqual(config.tracking.new_candidate_min_confidence, 0.45)
+        self.assertEqual(config.risk.min_violation_seconds, 0.8)
+        self.assertTrue(config.alert_validation.enabled)
+
+    def test_schema_two_ignores_schema_three_hardening_fields(self):
+        legacy = SafetyPipelineConfig.from_mapping({"schema_version": 2})
+        supplied = SafetyPipelineConfig.from_mapping({
+            "schema_version": 2,
+            "ppe": {
+                "tracking": {
+                    "admission": {"new_candidate_min_confidence": 0.95},
+                    "reacquisition": {"motion_model": "alpha_beta"},
+                },
+                "risk": {"verification": {"min_violation_seconds": 30.0}},
+            },
+            "alert_validation": {"enabled": True},
+        })
+        self.assertEqual(supplied.tracking.motion_model, "legacy")
+        self.assertEqual(supplied.tracking.new_candidate_min_confidence, 0.0)
+        self.assertEqual(supplied.risk.min_violation_seconds, 0.0)
+        self.assertFalse(supplied.alert_validation.enabled)
+        self.assertEqual(config_fingerprint(legacy), config_fingerprint(supplied))
+        self.assertEqual(
+            config_fingerprint(legacy),
+            "7f9e2cd6e58566adddabb454190eb475faca8e4845ce52b56339e081921bba8e",
+        )
+
+    def test_schema_three_rejects_unsafe_or_nonfinite_hardening_values(self):
+        invalid_documents = (
+            {"ppe": {"tracking": {"admission": {
+                "association_min_confidence": 0.8,
+                "new_candidate_min_confidence": 0.4,
+            }}}},
+            {"ppe": {"tracking": {"reacquisition": {"motion_model": "magic"}}}},
+            {"ppe": {"tracking": {"reacquisition": {"motion_model": "legacy"}}}},
+            {"ppe": {"risk": {"verification": {"min_stability": float("nan")}}}},
+            {"alert_validation": {"defaults": {
+                "min_duration_seconds": 2.0,
+                "window_seconds": 1.0,
+            }}},
+        )
+        for document in invalid_documents:
+            with self.subTest(document=document), self.assertRaises(ConfigError):
+                SafetyPipelineConfig.from_mapping({"schema_version": 3, **document})
+
+        with self.assertRaises(ConfigError):
+            SafetyPipelineConfig.from_mapping({
+                "schema_version": 3,
+                "ppe": {
+                    "tracking": {
+                        "admission": {"max_tentative_candidates": 0},
+                    },
+                },
+            })
+
 
 if __name__ == "__main__":
     unittest.main()
