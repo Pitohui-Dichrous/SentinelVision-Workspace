@@ -29,7 +29,18 @@ import threading, time  # time 以后用 time.time()
 
 from model_catalog import CatalogSnapshot, ClassProfile, ModelCatalog
 from model_runtime import ModelRuntime
-from project_paths import PROJECT_ROOT
+from project_paths import EVENTS_DIR, PROJECT_ROOT, SAFETY_PIPELINE_CONFIG
+from safety_pipeline import (
+    JsonlEventJournal,
+    PipelineClock,
+    PPETemporalPipeline,
+    config_fingerprint,
+    filter_monitoring_domain,
+    load_safety_pipeline_config_checked,
+    ppe_evidence_enabled,
+    stable_class_visible,
+)
+from safety_pipeline.types import ResolvedDetection
 from ui_font import install_ui_font
 from ui_theme import (
     PressableButton,
@@ -86,6 +97,9 @@ DEFAULT_ROLE = "Admin"  # Admin / Operator / Viewer
 # ===================== 动态模型/类别 =====================
 MODEL_CATALOG = ModelCatalog()
 CATALOG_SNAPSHOT = MODEL_CATALOG.scan(verify_hashes=True, inspect_new_models=True)
+SAFETY_PIPELINE_DEFAULTS, SAFETY_PIPELINE_CONFIG_VALID = load_safety_pipeline_config_checked(
+    SAFETY_PIPELINE_CONFIG
+)
 
 
 def class_profile(class_id: str) -> ClassProfile:
@@ -179,14 +193,6 @@ I18N = {
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
 
 # ===================== 工具 =====================
-def point_in_polygon(pt, poly):
-    x, y = pt; inside = False; n = len(poly)
-    for i in range(n):
-        x1,y1 = poly[i]; x2,y2 = poly[(i+1)%n]
-        if ((y1>y)!=(y2>y)) and (x < (x2-x1)*(y-y1)/(y2-y1+1e-9) + x1):
-            inside = not inside
-    return inside
-
 # ===================== 统一按压反馈 =====================
 class AnimatedButton(PressableButton):
     """Compatibility name backed by the shared pointer feedback primitive."""
@@ -242,8 +248,10 @@ class VideoWorker(QtCore.QThread):
     newAlert = QtCore.Signal(dict)
     modelStatus = QtCore.Signal(str, str, str)
     modelsApplied = QtCore.Signal(object, object)
+    pipelineStatsReady = QtCore.Signal(dict)
+    pipelineTransition = QtCore.Signal(dict)
 
-    def __init__(self, snapshot: CatalogSnapshot):
+    def __init__(self, snapshot: CatalogSnapshot, safety_config=SAFETY_PIPELINE_DEFAULTS):
         super().__init__()
         self._lock = threading.Lock()
         self._source = None
@@ -257,6 +265,9 @@ class VideoWorker(QtCore.QThread):
         self.rois = []
         self.masks = []
         self.current_source_id = None
+        self.current_source_kind = None
+        self.source_frame_index = 0
+        self.pipeline_clock = PipelineClock()
         self._fps_t0 = time.time()
         self._fps_counter = 0
 
@@ -283,6 +294,14 @@ class VideoWorker(QtCore.QThread):
         self.alert_min_hits = 15
         self.frame_hits = defaultdict(lambda: deque(maxlen=self.alert_win_n))
         self.last_alert_at = {}
+        self.safety_config = safety_config
+        self.safety_mode = safety_config.default_mode
+        self.safety_config_fingerprint = config_fingerprint(safety_config.with_mode(self.safety_mode))
+        self.safety_debug_overlay = False
+        self._pipeline_reset_requested = False
+        self.ppe_pipeline = PPETemporalPipeline(safety_config)
+        self._last_pipeline_stats_at = 0.0
+        self.event_journal = JsonlEventJournal(EVENTS_DIR / "ppe_events.jsonl")
 
     # ---------- thread-safe configuration ----------
     def configure_thresholds(self, conf, iou):
@@ -294,7 +313,30 @@ class VideoWorker(QtCore.QThread):
 
     def configure_classes(self, values):
         with self._lock:
-            self.class_enabled = dict(values)
+            updated = dict(values)
+            if updated != self.class_enabled:
+                old_values = self.class_enabled
+                self.class_enabled = updated
+                ppe_ids = (
+                    self.safety_config.conflict.protected_class_id,
+                    self.safety_config.conflict.unprotected_class_id,
+                )
+                if self.safety_mode == "ppe_temporal" and any(
+                    bool(old_values.get(class_id, True)) != bool(updated.get(class_id, True))
+                    for class_id in ppe_ids
+                ):
+                    self._pipeline_reset_requested = True
+
+    def configure_safety_pipeline(self, mode, debug_overlay=False):
+        if mode not in ("baseline", "ppe_temporal"):
+            mode = "baseline"
+        with self._lock:
+            debug_overlay = bool(debug_overlay)
+            if mode != self.safety_mode:
+                self.safety_mode = mode
+                self.safety_config_fingerprint = config_fingerprint(self.safety_config.with_mode(mode))
+                self._pipeline_reset_requested = True
+            self.safety_debug_overlay = debug_overlay
 
     def configure_polys(self, rois, masks):
         with self._lock:
@@ -313,15 +355,35 @@ class VideoWorker(QtCore.QThread):
                 self.selected_model_ids = requested
                 self._selection_generation += 1
 
-    def set_source(self, source_obj, source_id):
+    def record_alert(self, alert):
+        fields = (
+            "id", "event_id", "track_id", "ts", "source_id", "cls", "conf", "severity",
+            "model_ids", "risk_type", "stable_state", "risk_state", "confirmation_delay",
+            "pipeline_mode", "config_fingerprint",
+        )
+        payload = {key: alert.get(key) for key in fields if key in alert}
+        self.event_journal.append("alert", payload)
+
+    def record_review(self, alert_id, conclusion, track_id=None, event_id=None):
+        self.event_journal.append("human_review", {
+            "alert_id": str(alert_id),
+            "event_id": event_id,
+            "track_id": track_id,
+            "conclusion": str(conclusion),
+        })
+
+    def set_source(self, source_obj, source_id, source_kind=None):
         with self._lock:
             self._source = source_obj
             self.current_source_id = source_id
+            self.current_source_kind = source_kind
             self._want_open = True
 
     def stop_source(self):
         with self._lock:
             self._source = None
+            self.current_source_id = None
+            self.current_source_kind = None
             self._want_open = True
 
     def set_paused(self, flag: bool):
@@ -346,6 +408,24 @@ class VideoWorker(QtCore.QThread):
         self.track_next_id = 1
         self.frame_hits.clear()
         self.last_alert_at.clear()
+        self.ppe_pipeline.reset()
+        self._last_pipeline_stats_at = 0.0
+
+    def _reset_ppe_state(self):
+        """Reset PPE reasoning without erasing the legacy Fire cooldown."""
+
+        ppe_class_ids = {
+            self.safety_config.conflict.protected_class_id,
+            self.safety_config.conflict.unprotected_class_id,
+            self.safety_config.conflict.uncertain_class_id,
+        }
+        self.tracks = [track for track in self.tracks if track["cls"] not in ppe_class_ids]
+        for state_map in (self.frame_hits, self.last_alert_at):
+            for key in tuple(state_map):
+                if len(key) >= 2 and key[1] in ppe_class_ids:
+                    state_map.pop(key, None)
+        self.ppe_pipeline.reset()
+        self._last_pipeline_stats_at = 0.0
 
     @staticmethod
     def _box_iou(a, b):
@@ -461,11 +541,30 @@ class VideoWorker(QtCore.QThread):
                 masks = self.masks
                 class_enabled = dict(self.class_enabled)
                 snapshot = self.catalog_snapshot
+                source_id = self.current_source_id or "unknown"
+                source_kind = self.current_source_kind
+                safety_mode = self.safety_mode
+                safety_debug_overlay = self.safety_debug_overlay
+                safety_config_fingerprint = self.safety_config_fingerprint
+                pipeline_reset_requested = self._pipeline_reset_requested
+                self._pipeline_reset_requested = False
+            if pipeline_reset_requested:
+                self._reset_ppe_state()
+                self.pipelineStatsReady.emit({
+                    "mode": safety_mode,
+                    "frames_processed": 0,
+                    "conflicts_resolved": 0,
+                    "active_tracks": 0,
+                    "confirmed_events": 0,
+                    "alerts_emitted": 0,
+                })
             if want_open:
                 self._close_cap()
                 with self._lock:
                     self._want_open = False
                 self._reset_temporal_state()
+                self.source_frame_index = 0
+                self.pipeline_clock.reset()
                 if source is None:
                     self.statusMsg.emit("已停止并释放视频源")
                 else:
@@ -493,6 +592,7 @@ class VideoWorker(QtCore.QThread):
                 continue
 
             self._fps_counter += 1
+            self.source_frame_index += 1
             now_time = time.time()
             if now_time - self._fps_t0 >= 1.0:
                 self.fpsReady.emit(self._fps_counter / (now_time - self._fps_t0))
@@ -500,6 +600,7 @@ class VideoWorker(QtCore.QThread):
                 self._fps_counter = 0
 
             overlay = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+            pending_alerts = []
             self.frame_count += 1
             self._watermark(overlay)
             do_infer = self.frame_count % max(1, DETECT_EVERY_N) == 0
@@ -517,36 +618,158 @@ class VideoWorker(QtCore.QThread):
                         )
                         self._reset_temporal_state()
                         self.modelsApplied.emit(list(self.active_model_ids), inference_failures)
-                    detections = []
-                    for detection in raw_detections:
-                        if not class_enabled.get(detection.class_id, True):
-                            continue
-                        x1, y1, x2, y2 = detection.box
-                        center = ((x1 + x2) / 2.0, (y1 + y2) / 2.0)
-                        if any(point_in_polygon(center, mask) for mask in masks):
-                            continue
-                        if rois and not any(point_in_polygon(center, roi) for roi in rois):
-                            continue
-                        detections.append({
-                            "cls": detection.class_id,
-                            "conf": detection.confidence,
-                            "box": detection.box,
-                            "model_ids": detection.source_model_ids,
-                        })
-                    self._update_tracks(detections)
+                    spatial_detections = filter_monitoring_domain(raw_detections, rois, masks)
+                    if safety_mode == "ppe_temporal":
+                        resolution = self.ppe_pipeline.resolve(spatial_detections)
+                        pipeline_inputs = resolution.detections
+                    else:
+                        resolution = None
+                        pipeline_inputs = spatial_detections
+
+                    legacy_detections = []
+                    ppe_detections = []
+                    uncertain_id = self.safety_config.conflict.uncertain_class_id
+                    protected_id = self.safety_config.conflict.protected_class_id
+                    unprotected_id = self.safety_config.conflict.unprotected_class_id
+                    collect_ppe_evidence = ppe_evidence_enabled(
+                        class_enabled,
+                        protected_id,
+                        unprotected_id,
+                    )
+                    for detection in pipeline_inputs:
+                        class_id = detection.class_id
+                        if safety_mode == "ppe_temporal" and isinstance(detection, ResolvedDetection):
+                            if collect_ppe_evidence:
+                                ppe_detections.append(detection)
+                        else:
+                            if not class_enabled.get(class_id, True):
+                                continue
+                            legacy_detections.append({
+                                "cls": class_id,
+                                "conf": detection.confidence,
+                                "box": detection.box,
+                                "model_ids": detection.source_model_ids,
+                            })
+                    self._update_tracks(legacy_detections)
+
+                    pipeline_frame = None
+                    if safety_mode == "ppe_temporal" and resolution is not None:
+                        filtered_resolution = self.ppe_pipeline.summarize_filtered(ppe_detections)
+                        ppe_alert_profile = snapshot.class_profiles.get(
+                            unprotected_id,
+                            class_profile(unprotected_id),
+                        )
+                        ppe_alerts_enabled = bool(
+                            ppe_alert_profile.alert_enabled
+                            and ppe_alert_profile.severity
+                            and class_enabled.get(unprotected_id, True)
+                        )
+                        pipeline_timestamp = time.monotonic()
+                        if source_kind == "file":
+                            position_ms = float(self.cap.get(cv2.CAP_PROP_POS_MSEC))
+                            source_fps = float(self.cap.get(cv2.CAP_PROP_FPS))
+                            pipeline_timestamp = self.pipeline_clock.next_timestamp(
+                                source_kind,
+                                pipeline_timestamp,
+                                pts_ms=position_ms,
+                                fps=source_fps,
+                                frame_index=max(0, self.source_frame_index - 1),
+                            )
+                        pipeline_frame = self.ppe_pipeline.process(
+                            ppe_detections,
+                            filtered_resolution,
+                            pipeline_timestamp,
+                            alerts_enabled=ppe_alerts_enabled,
+                        )
+                        for transition in pipeline_frame.transitions:
+                            transition_record = {
+                                "session_id": pipeline_frame.metrics.session_id,
+                                "source_id": source_id,
+                                "pipeline_mode": safety_mode,
+                                "config_fingerprint": safety_config_fingerprint,
+                                "track_id": transition.track_id,
+                                "risk_type": transition.risk_type,
+                                "from_state": transition.from_state.value,
+                                "to_state": transition.to_state.value,
+                                "at": transition.at,
+                                "reason": transition.reason,
+                                "event_id": transition.event_id,
+                            }
+                            self.pipelineTransition.emit(transition_record)
+                            self.event_journal.append("risk_transition", transition_record)
+                        if now_time - self._last_pipeline_stats_at >= 1.0:
+                            self.pipelineStatsReady.emit(dict(pipeline_frame.metrics.as_dict()))
+                            self._last_pipeline_stats_at = now_time
 
                     present_now = set()
                     present_conf = {}
                     present_models: Dict[Tuple[str, str], Tuple[str, ...]] = {}
-                    source_id = self.current_source_id or "unknown"
-                    for track in self.tracks:
+                    render_tracks = list(self.tracks)
+                    if pipeline_frame is not None:
+                        for detection in pipeline_frame.detections:
+                            if not stable_class_visible(
+                                detection.class_id,
+                                class_enabled,
+                                protected_id,
+                                unprotected_id,
+                                uncertain_id,
+                            ):
+                                continue
+                            render_tracks.append({
+                                "id": detection.track_id,
+                                "cls": detection.class_id,
+                                "conf": detection.confidence,
+                                "box": detection.box,
+                                "model_ids": detection.source_model_ids,
+                                "hits": self.safety_config.tracking.min_hits,
+                                "miss": 0,
+                                "updated": True,
+                                "ppe_result": detection,
+                            })
+                        for alert in pipeline_frame.alerts:
+                            profile = snapshot.class_profiles.get(
+                                alert.class_id,
+                                class_profile(alert.class_id),
+                            )
+                            if not profile.alert_enabled or not profile.severity:
+                                continue
+                            pending_alerts.append({
+                                "id": alert.event_id,
+                                "ts": time.time(),
+                                "source_id": source_id,
+                                "cls": alert.class_id,
+                                "conf": alert.confidence,
+                                "severity": profile.severity,
+                                "snapshot": None,
+                                "model_ids": list(alert.source_model_ids),
+                                "track_id": alert.track_id,
+                                "event_id": alert.event_id,
+                                "risk_type": alert.risk_type,
+                                "stable_state": alert.stable_state.value,
+                                "risk_state": alert.risk_state.value,
+                                "confirmation_delay": max(0.0, alert.alarmed_at - alert.first_seen),
+                                "pipeline_mode": safety_mode,
+                                "config_fingerprint": safety_config_fingerprint,
+                            })
+
+                    for track in render_tracks:
                         if track["hits"] < self.min_hits and track["miss"] == 0:
                             continue
                         x1, y1, x2, y2 = map(int, track["box"])
                         profile = snapshot.class_profiles.get(track["cls"], class_profile(track["cls"]))
                         color = profile.color_rgb
                         cv2.rectangle(overlay, (x1, y1), (x2, y2), color, 2)
-                        label = "%s %.2f" % (profile.display_en, track["conf"])
+                        ppe_result = track.get("ppe_result")
+                        if ppe_result is None:
+                            label = "%s %.2f" % (profile.display_en, track["conf"])
+                        else:
+                            label = "#%s %s %.2f" % (track["id"], profile.display_en, track["conf"])
+                            if safety_debug_overlay:
+                                label += " | raw:%s stable:%s risk:%s" % (
+                                    ppe_result.raw_state.value,
+                                    ppe_result.stable_state.value,
+                                    ppe_result.risk_state.value,
+                                )
                         (text_width, text_height), _ = cv2.getTextSize(
                             label, cv2.FONT_HERSHEY_SIMPLEX, 0.6, 1
                         )
@@ -573,6 +796,8 @@ class VideoWorker(QtCore.QThread):
                     for class_id, profile in snapshot.class_profiles.items():
                         if not profile.alert_enabled or not profile.severity:
                             continue
+                        if safety_mode == "ppe_temporal" and class_id == unprotected_id:
+                            continue
                         if not class_enabled.get(class_id, True):
                             continue
                         key = (source_id, class_id)
@@ -583,7 +808,7 @@ class VideoWorker(QtCore.QThread):
                             and now_seconds - self.last_alert_at.get(key, 0.0) >= 10.0
                         ):
                             self.last_alert_at[key] = now_seconds
-                            self.newAlert.emit({
+                            pending_alerts.append({
                                 "id": str(_next_alert_id()),
                                 "ts": now_seconds,
                                 "source_id": source_id,
@@ -592,6 +817,7 @@ class VideoWorker(QtCore.QThread):
                                 "severity": profile.severity,
                                 "snapshot": None,
                                 "model_ids": list(present_models.get(key, ())),
+                                "pipeline_mode": "baseline" if safety_mode == "baseline" else "legacy_class_path",
                             })
                 except Exception as exc:
                     self.statusMsg.emit("推理异常：%s" % exc)
@@ -604,6 +830,8 @@ class VideoWorker(QtCore.QThread):
                 QtGui.QImage.Format.Format_RGB888,
             ).copy()
             self.frameReady.emit(qimage, overlay.shape[1], overlay.shape[0])
+            for alert in pending_alerts:
+                self.newAlert.emit(alert)
             time.sleep(0.005)
 
         self._close_cap()
@@ -751,8 +979,9 @@ class AlertsModel(QtCore.QAbstractListModel):
         if role==QtCore.Qt.ItemDataRole.DisplayRole:
             cls_disp = class_display_name(a.cls, self.language_getter())
             model_tag = ", ".join(getattr(a, "model_ids", ()) or ()) or "—"
+            track_tag = " · Track #%s" % a.track_id if getattr(a, "track_id", None) is not None else ""
             timestamp = time.strftime('%Y-%m-%d  %H:%M:%S', time.localtime(a.ts))
-            return f"{cls_disp}  ·  {a.conf:.0%}\n{timestamp}  ·  {a.source_id}  ·  {model_tag}"
+            return f"{cls_disp}  ·  {a.conf:.0%}{track_tag}\n{timestamp}  ·  {a.source_id}  ·  {model_tag}"
         if role==QtCore.Qt.ItemDataRole.SizeHintRole:
             return QtCore.QSize(280, 54)
         if role==QtCore.Qt.ItemDataRole.ToolTipRole:
@@ -784,6 +1013,15 @@ class MainWindow(QtWidgets.QMainWindow):
         self.catalog_snapshot = CATALOG_SNAPSHOT
         self.settings_path = PROJECT_ROOT / ".runtime" / "config" / "sentinel_settings.json"
         self.saved_settings = self._load_settings()
+        self.safety_config = SAFETY_PIPELINE_DEFAULTS
+        saved_pipeline = self.saved_settings.get("safety_pipeline", {})
+        if not isinstance(saved_pipeline, dict):
+            saved_pipeline = {}
+        saved_mode = str(saved_pipeline.get("mode", self.safety_config.default_mode))
+        if not SAFETY_PIPELINE_CONFIG_VALID:
+            saved_mode = "baseline"
+        self.safety_mode = saved_mode if saved_mode in ("baseline", "ppe_temporal") else "baseline"
+        self.safety_debug_overlay = bool(saved_pipeline.get("debug_overlay", False))
         self.selected_model_ids = self._initial_model_selection()
         self._closing_after_worker = False
 
@@ -1024,8 +1262,14 @@ class MainWindow(QtWidgets.QMainWindow):
         S.addStretch(1)
 
         # 检测页：模型、阈值与目标类别是一个连续配置任务。
-        self.detection_tab = QtWidgets.QWidget()
-        C = QtWidgets.QGridLayout(self.detection_tab)
+        self.detection_tab = QtWidgets.QScrollArea()
+        self.detection_tab.setWidgetResizable(True)
+        self.detection_tab.setFrameShape(QtWidgets.QFrame.Shape.NoFrame)
+        self.detection_tab.setHorizontalScrollBarPolicy(QtCore.Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.detection_content = QtWidgets.QWidget()
+        C = QtWidgets.QGridLayout(self.detection_content)
+        C.setSizeConstraint(QtWidgets.QLayout.SizeConstraint.SetMinimumSize)
+        self.detection_tab.setWidget(self.detection_content)
         C.setContentsMargins(14, 16, 14, 14)
         C.setHorizontalSpacing(8)
         C.setVerticalSpacing(9)
@@ -1100,6 +1344,36 @@ class MainWindow(QtWidgets.QMainWindow):
         row += 1
         C.addWidget(self._hline(), row, 0, 1, 3)
         row += 1
+        self.analysis_title = QtWidgets.QLabel("分析模式")
+        self.analysis_title.setProperty("textRole", "sectionTitle")
+        C.addWidget(self.analysis_title, row, 0, 1, 3)
+        row += 1
+        self.safety_mode_combo = ThemedComboBox()
+        self.safety_mode_combo.addItem("兼容基线", "baseline")
+        self.safety_mode_combo.addItem("PPE 时序增强", "ppe_temporal")
+        mode_index = self.safety_mode_combo.findData(self.safety_mode)
+        self.safety_mode_combo.setCurrentIndex(max(0, mode_index))
+        self.safety_mode_combo.setEnabled(SAFETY_PIPELINE_CONFIG_VALID)
+        if not SAFETY_PIPELINE_CONFIG_VALID:
+            self.safety_mode_combo.setToolTip(
+                "安全管线配置无效，已锁定兼容基线"
+                if self.lang_code == "zh" else
+                "Safety pipeline config is invalid; baseline is locked"
+            )
+        self.safety_debug_check = QtWidgets.QCheckBox("显示 raw / stable 调试信息")
+        self.safety_debug_check.setChecked(self.safety_debug_overlay)
+        self.safety_debug_check.setEnabled(self.safety_mode == "ppe_temporal")
+        C.addWidget(self.safety_mode_combo, row, 0, 1, 3)
+        row += 1
+        C.addWidget(self.safety_debug_check, row, 0, 1, 3)
+        row += 1
+        self.pipeline_stats_label = QtWidgets.QLabel()
+        self.pipeline_stats_label.setObjectName("MutedLabel")
+        self.pipeline_stats_label.setWordWrap(True)
+        C.addWidget(self.pipeline_stats_label, row, 0, 1, 3)
+        row += 1
+        C.addWidget(self._hline(), row, 0, 1, 3)
+        row += 1
         self.lbl_classes = QtWidgets.QLabel()
         self.lbl_classes.setProperty("textRole", "sectionTitle")
         C.addWidget(self.lbl_classes, row, 0, 1, 3)
@@ -1122,6 +1396,9 @@ class MainWindow(QtWidgets.QMainWindow):
         self.class_checks = {}
         self._rebuild_model_controls()
         self._rebuild_class_controls()
+        self.safety_mode_combo.currentIndexChanged.connect(self._apply_safety_pipeline_settings)
+        self.safety_debug_check.toggled.connect(self._apply_safety_pipeline_settings)
+        self._update_pipeline_stats({"mode": self.safety_mode})
 
         # 事件页：时间轴与人工复核入口。
         self.events_tab = QtWidgets.QWidget()
@@ -1232,15 +1509,20 @@ class MainWindow(QtWidgets.QMainWindow):
         self.src_quick.blockSignals(False)
 
         # 线程
-        self.worker = VideoWorker(self.catalog_snapshot)
+        self.worker = VideoWorker(self.catalog_snapshot, self.safety_config)
         self.worker.frameReady.connect(self._on_frame)
         self.worker.statusMsg.connect(self.statusBar().showMessage)
         self.worker.fpsReady.connect(lambda f:self.lbl_fps.setText(f"FPS {f:.1f}"))
         self.worker.newAlert.connect(self._on_new_alert)
         self.worker.modelStatus.connect(self._on_model_status)
         self.worker.modelsApplied.connect(self._on_models_applied)
+        self.worker.pipelineStatsReady.connect(self._update_pipeline_stats)
         self.worker.configure_models(self.selected_model_ids)
         self.worker.configure_classes(self._class_selection_map())
+        self.worker.configure_safety_pipeline(
+            self.safety_mode,
+            self.safety_debug_overlay and self.safety_mode == "ppe_temporal",
+        )
         self.worker.start()
 
         # 现在再连接源切换信号，并主动切一次当前源
@@ -1308,11 +1590,23 @@ class MainWindow(QtWidgets.QMainWindow):
             preserved_class_values = {}
         preserved_class_values = dict(preserved_class_values)
         preserved_class_values.update(class_values)
-        document = {
-            "schema_version": 2,
+        # Preserve fields written by newer optional modules instead of
+        # rebuilding and silently deleting them on every model/class change.
+        document = dict(self.saved_settings)
+        pipeline_settings = document.get("safety_pipeline", {})
+        if not isinstance(pipeline_settings, dict):
+            pipeline_settings = {}
+        pipeline_settings = dict(pipeline_settings)
+        pipeline_settings.update({
+            "mode": self.safety_mode,
+            "debug_overlay": bool(self.safety_debug_overlay),
+        })
+        document.update({
+            "schema_version": 3,
             "selected_model_ids": list(self.selected_model_ids),
             "class_enabled": preserved_class_values,
-        }
+            "safety_pipeline": pipeline_settings,
+        })
         try:
             self.settings_path.parent.mkdir(parents=True, exist_ok=True)
             temporary = self.settings_path.with_suffix(".tmp")
@@ -1399,7 +1693,17 @@ class MainWindow(QtWidgets.QMainWindow):
             checkbox = QtWidgets.QCheckBox(profile.display_name(self.lang_code))
             checked = previous.get(class_id, configured.get(class_id, profile.enabled_by_default))
             checkbox.setChecked(bool(checked))
-            checkbox.setToolTip(class_id)
+            if class_id in (
+                self.safety_config.conflict.protected_class_id,
+                self.safety_config.conflict.unprotected_class_id,
+            ):
+                checkbox.setToolTip(
+                    "%s · 增强模式仍保留互斥类别作为判断证据" % class_id
+                    if self.lang_code == "zh" else
+                    "%s · temporal mode retains mutually-exclusive evidence" % class_id
+                )
+            else:
+                checkbox.setToolTip(class_id)
             checkbox.stateChanged.connect(self._apply_classes)
             self.class_checks[class_id] = checkbox
             self.class_list_layout.addWidget(checkbox, index // 2, index % 2)
@@ -1586,14 +1890,14 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def _apply_responsive_layout(self):
         compact = self.width() < 1320
-        short = self.height() < 800
+        short = self.height() < 880
         self.sub.setVisible(not compact)
         self.regions_hint.setVisible(self.width() >= 1380)
         self.source_state.setMaximumWidth(190 if compact else 320)
         self.inspector_panel.setMinimumWidth(350 if compact else 380)
         self.inspector_panel.setMaximumWidth(430 if compact else 500)
-        self.model_scroll.setMinimumHeight(104 if short else 138)
-        self.model_scroll.setMaximumHeight(122 if short else 200)
+        self.model_scroll.setMinimumHeight(115 if short else 138)
+        self.model_scroll.setMaximumHeight(115 if short else 200)
         self.class_scroll.setMinimumHeight(54 if short else 88)
         self.class_scroll.setMaximumHeight(72 if short else 145)
 
@@ -1659,6 +1963,20 @@ class MainWindow(QtWidgets.QMainWindow):
             self.source_state.setText("等待选择视频源" if is_zh else "Waiting for a video source")
         self.lbl_model.setText("检测模型" if is_zh else "Detection models")
         self.threshold_title.setText("检测灵敏度" if is_zh else "Detection sensitivity")
+        self.analysis_title.setText("分析模式" if is_zh else "Analysis mode")
+        self.safety_mode_combo.blockSignals(True)
+        self.safety_mode_combo.setItemText(0, "兼容基线" if is_zh else "Compatibility baseline")
+        self.safety_mode_combo.setItemText(1, "PPE 时序增强" if is_zh else "PPE temporal enhancement")
+        self.safety_mode_combo.blockSignals(False)
+        self.safety_debug_check.setText(
+            "显示 raw / stable 调试信息" if is_zh else "Show raw / stable debug overlay"
+        )
+        if not SAFETY_PIPELINE_CONFIG_VALID:
+            self.safety_mode_combo.setToolTip(
+                "安全管线配置无效，已锁定兼容基线"
+                if is_zh else
+                "Safety pipeline config is invalid; baseline is locked"
+            )
         self.lbl_classes.setText("识别目标" if is_zh else "Detection targets")
         self.btn_rescan_models.setText("扫描 RESULTS" if is_zh else "Scan RESULTS")
         self.lbl_conf.setText("置信阈值" if is_zh else "Confidence")
@@ -1691,6 +2009,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.btn_close_drawer.setText("关闭详情" if is_zh else "Close")
         self._rebuild_class_controls()
         self._update_model_summary()
+        self._update_pipeline_stats({"mode": self.safety_mode})
 
     # ---------- 权限 ----------
     def apply_role(self, role_text=None):
@@ -1703,11 +2022,14 @@ class MainWindow(QtWidgets.QMainWindow):
             self.btn_add_roi, self.btn_add_mask, self.btn_edit_poly, self.btn_clear_poly,
             self.btn_file, self.txt_url, self.btn_load, self.btn_webcam, self.btn_demo1, self.btn_demo2,
             self.s_conf, self.v_conf, self.s_iou, self.v_iou, self.btn_rescan_models,
+            self.safety_mode_combo, self.safety_debug_check,
             *self.model_checks.values(), *self.class_checks.values(),
             self.list_alerts, self.btn_clear_alerts, self.btn_export_csv, self.btn_export_json,
             self.btn_mark_ok, self.btn_mark_ng, self.btn_snapshot
         ]
         for w in widgets: w.setEnabled(allow)
+        self.safety_mode_combo.setEnabled(allow and SAFETY_PIPELINE_CONFIG_VALID)
+        self.safety_debug_check.setEnabled(allow and self.safety_mode == "ppe_temporal")
         if allow:
             for spec in self.catalog_snapshot.models:
                 checkbox = self.model_checks.get(spec.model_id)
@@ -1804,7 +2126,7 @@ class MainWindow(QtWidgets.QMainWindow):
         set_property(self.live_badge, "badge", "warning")
         self.statusBar().showMessage(self.L("status_switching"))
         self.canvas.clear_all_polys()
-        self.worker.set_source(src, sid)
+        self.worker.set_source(src, sid, kind)
     def stop_source(self):
         self.worker.stop_source(); self.active_source_id = None
         self.source_state.setText("等待选择视频源" if self.lang_code == "zh" else "Waiting for a video source")
@@ -1829,6 +2151,69 @@ class MainWindow(QtWidgets.QMainWindow):
         self.set_source(url, kind, sid)
 
     # ---------- 阈值/类别 ----------
+    def _apply_safety_pipeline_settings(self, *_):
+        previous_mode = self.safety_mode
+        mode = self.safety_mode_combo.currentData()
+        if not SAFETY_PIPELINE_CONFIG_VALID:
+            mode = "baseline"
+            self.safety_mode_combo.blockSignals(True)
+            self.safety_mode_combo.setCurrentIndex(
+                max(0, self.safety_mode_combo.findData("baseline"))
+            )
+            self.safety_mode_combo.blockSignals(False)
+        self.safety_mode = mode if mode in ("baseline", "ppe_temporal") else "baseline"
+        self.safety_debug_overlay = bool(self.safety_debug_check.isChecked())
+        enhanced = self.safety_mode == "ppe_temporal"
+        self.safety_debug_check.setEnabled(enhanced and not self.is_viewer)
+        if hasattr(self, "worker"):
+            self.worker.configure_safety_pipeline(
+                self.safety_mode,
+                self.safety_debug_overlay and enhanced,
+            )
+        self._save_settings()
+        self._update_pipeline_stats({"mode": self.safety_mode})
+        if previous_mode != self.safety_mode:
+            message = (
+                ("已切换到 PPE 时序增强；旧 PPE 轨迹和证据已清空" if enhanced else "已切换到兼容基线；旧 PPE 轨迹和证据已清空")
+                if self.lang_code == "zh" else
+                ("PPE temporal mode enabled; prior PPE state was reset" if enhanced else "Compatibility baseline enabled; prior PPE state was reset")
+            )
+        else:
+            message = (
+                ("已显示 raw / stable 调试信息" if self.safety_debug_overlay else "已隐藏 raw / stable 调试信息")
+                if self.lang_code == "zh" else
+                ("Raw / stable debug overlay shown" if self.safety_debug_overlay else "Raw / stable debug overlay hidden")
+            )
+        self.statusBar().showMessage(message)
+
+    def _update_pipeline_stats(self, stats):
+        stats = stats if isinstance(stats, dict) else {}
+        mode = str(stats.get("mode", self.safety_mode))
+        previous = getattr(self, "_pipeline_stats_snapshot", {})
+        if isinstance(previous, dict) and previous.get("mode") == mode:
+            merged = dict(previous)
+            merged.update(stats)
+            stats = merged
+        self._pipeline_stats_snapshot = dict(stats)
+        is_zh = self.lang_code == "zh"
+        if mode != "ppe_temporal":
+            text = (
+                "兼容基线 · 原有按来源/类别的多帧门控"
+                if is_zh else
+                "Compatibility baseline · legacy source/class temporal gate"
+            )
+        else:
+            tracks = int(stats.get("active_tracks", 0) or 0)
+            conflicts = int(stats.get("conflicts_resolved", 0) or 0)
+            events = int(stats.get("confirmed_events", stats.get("alerts_emitted", 0)) or 0)
+            frames = int(stats.get("frames_processed", 0) or 0)
+            text = (
+                "PPE 时序增强 · %d 帧 · %d 条轨迹 · 已消解 %d 次冲突 · %d 个事件"
+                if is_zh else
+                "PPE temporal · %d frames · %d tracks · %d conflicts resolved · %d events"
+            ) % (frames, tracks, conflicts, events)
+        self.pipeline_stats_label.setText(text)
+
     def _apply_thresholds(self):
         conf = float(self.v_conf.value()); iou = float(self.v_iou.value())
         self.worker.configure_thresholds(conf, iou)
@@ -1858,6 +2243,8 @@ class MainWindow(QtWidgets.QMainWindow):
                 snapshot_bytes = bytes(data)
         a_dict["_snapshot_bytes"] = snapshot_bytes
         self.alerts_model.add_alert(Alert(**a_dict))
+        if hasattr(self.worker, "record_alert"):
+            self.worker.record_alert(a_dict)
         self.alert_count_badge.setText(str(len(self.alerts_model.items)))
         set_property(self.alert_count_badge, "badge", "warning")
     def _open_alert_detail(self, index: QtCore.QModelIndex):
@@ -1875,6 +2262,21 @@ class MainWindow(QtWidgets.QMainWindow):
             ("人工结论" if self.lang_code=="zh" else "Review"): getattr(a, "review", "unreviewed"),
             ("检测参数" if self.lang_code=="zh" else "Detection settings"): f"YOLOv5 | conf≥{self.v_conf.value():.2f} | IoU≤{self.v_iou.value():.2f}"
         }
+        if getattr(a, "track_id", None) is not None:
+            info[("轨迹 ID" if self.lang_code=="zh" else "Track ID")] = a.track_id
+            info[("事件 ID" if self.lang_code=="zh" else "Event ID")] = getattr(a, "event_id", a.id)
+            info[("风险类型" if self.lang_code=="zh" else "Risk type")] = getattr(a, "risk_type", "—")
+            info[("稳定状态" if self.lang_code=="zh" else "Stable state")] = getattr(a, "stable_state", "—")
+            info[("风险状态" if self.lang_code=="zh" else "Risk state")] = getattr(a, "risk_state", "—")
+            info[("确认延迟（秒）" if self.lang_code=="zh" else "Confirmation delay (s)")] = round(
+                float(getattr(a, "confirmation_delay", 0.0)), 3
+            )
+        info[("分析模式" if self.lang_code=="zh" else "Pipeline mode")] = getattr(
+            a, "pipeline_mode", "baseline"
+        )
+        info[("配置指纹" if self.lang_code=="zh" else "Config fingerprint")] = getattr(
+            a, "config_fingerprint", "—"
+        )
         self.drawer_info.setPlainText(json.dumps(info, indent=2, ensure_ascii=False))
         self._open_drawer()
 
@@ -1884,6 +2286,13 @@ class MainWindow(QtWidgets.QMainWindow):
             self.statusBar().showMessage(self.L("no_alert"))
             return
         self.current_alert.review = conclusion
+        if hasattr(self.worker, "record_review"):
+            self.worker.record_review(
+                self.current_alert.id,
+                conclusion,
+                getattr(self.current_alert, "track_id", None),
+                getattr(self.current_alert, "event_id", None),
+            )
         self.statusBar().showMessage("告警人工结论已记录：%s" % conclusion)
         index = self.alerts_model.index(self.alerts_model.items.index(self.current_alert), 0)
         self._open_alert_detail(index)
@@ -1950,12 +2359,20 @@ class MainWindow(QtWidgets.QMainWindow):
         if not path: return
         with open(path, "w", encoding="utf-8-sig", newline="") as f:
             writer = csv.writer(f)
-            writer.writerow(["id", "ts", "iso", "source", "class_id", "class_name", "confidence", "severity", "models", "review", "snapshot"])
+            writer.writerow([
+                "id", "event_id", "track_id", "ts", "iso", "source", "class_id", "class_name",
+                "confidence", "severity", "models", "pipeline_mode", "config_fingerprint", "risk_type",
+                "stable_state", "risk_state", "confirmation_delay", "review", "snapshot",
+            ])
             for a in self.alerts_model.items:
                 writer.writerow([
-                    a.id, a.ts, time.strftime('%Y-%m-%dT%H:%M:%S', time.localtime(a.ts)),
+                    a.id, getattr(a, "event_id", ""), getattr(a, "track_id", ""),
+                    a.ts, time.strftime('%Y-%m-%dT%H:%M:%S', time.localtime(a.ts)),
                     a.source_id, a.cls, class_display_name(a.cls, self.lang_code), "%.4f" % a.conf,
                     getattr(a, "severity", "info"), ";".join(getattr(a, "model_ids", ()) or ()),
+                    getattr(a, "pipeline_mode", "baseline"), getattr(a, "config_fingerprint", ""),
+                    getattr(a, "risk_type", ""), getattr(a, "stable_state", ""),
+                    getattr(a, "risk_state", ""), getattr(a, "confirmation_delay", ""),
                     getattr(a, "review", "unreviewed"), getattr(a, "snapshot", None) or "",
                 ])
         self.statusBar().showMessage(f"CSV -> {path}")
@@ -1998,7 +2415,8 @@ class MainWindow(QtWidgets.QMainWindow):
     def apply_theme(self):
         self.setStyleSheet(self._build_stylesheet())
         self.drawer.setStyleSheet("")
-        for combo in (self.lang, self.role, self.src_quick): combo.apply_theme()
+        for combo in (self.lang, self.role, self.src_quick, self.safety_mode_combo):
+            combo.apply_theme()
         self.canvas.update()
 
 # ===================== 入口 =====================

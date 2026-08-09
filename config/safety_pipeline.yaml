@@ -1,0 +1,39 @@
+# SentinelVision safety reasoning defaults.
+#
+# The default remains "baseline" so existing schema-v2 user settings keep the
+# exact legacy behavior until an operator explicitly enables PPE temporal mode.
+# Values below are engineering starting points for controlled experiments, not
+# industrial standards or certified safety thresholds.
+schema_version: 1
+default_mode: baseline
+
+ppe:
+  conflict:
+    protected_class_id: hat
+    unprotected_class_id: person
+    uncertain_class_id: ppe_uncertain
+    min_iou: 0.60
+    score_margin: 0.20
+    max_center_distance_ratio: 0.35
+    min_area_ratio: 0.50
+
+  tracking:
+    iou_threshold: 0.30
+    max_lost_frames: 6
+    min_hits: 2
+    smoothing_alpha: 0.70
+
+  temporal:
+    window_size: 8
+    min_votes: 6
+    ema_alpha: 0.35
+    score_margin: 0.12
+    min_stable_frames: 1
+    recovery_frames: 3
+    missing_tolerance: 3
+
+  risk:
+    suspect_frames: 1
+    confirm_frames: 2
+    recovery_frames: 4
+    cooldown_seconds: 10.0

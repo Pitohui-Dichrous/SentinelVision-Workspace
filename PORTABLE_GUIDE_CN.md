@@ -43,6 +43,20 @@ SENTINEL 每次启动扫描 `RESULTS`，按复选框加载模型，不再存在 
 
 现有历史模型来源仍标记为未知，不能根据当前项目中的旧 `runs` 推断其真实训练项目。详情见 `RESULTS/README_DEPLOYMENT_CN.md`。
 
+## PPE 时序安全管线
+
+检测台保留“兼容基线”，并提供可显式启用的“PPE 时序增强”。增强算法全部位于工作库源码中，不增加网络下载、外部服务或新的二进制依赖；便携 Python 已有的 PyYAML 足以读取版本化配置。
+
+- Git 跟踪默认配置：`config/safety_pipeline.yaml`；
+- 当前电脑的模式选择：`.runtime/config/sentinel_settings.json`；
+- 低频事件审计：`.runtime/events/ppe_events.jsonl`。
+
+`.runtime` 整体处于 Git 忽略边界，换电脑时可以重新生成。配置中的 0.60、0.20、8 帧/6 票等数值只用于初始实验，不是行业标准。完整字段见 `docs/TEMPORAL_PIPELINE_CONFIG_CN.md`。
+
+事件日志只记录状态转换、事件字段和人工结论，不逐帧写入视频，因此不会因普通监控帧率快速膨胀。后续若启用完整实验 trace，必须继续写入 `.runtime/experiments` 并设置空间上限，不能放到源码或 `RESULTS`。
+
+当前便携版本只完成 PPE 冲突、跟踪、时序与风险状态的首个纵切。Fire Temporal、Dynamic Risk、Hard Sample、Watchdog、自动实验报告、自动训练优化和 Dynamic ROI 尚未启用，也不会触发额外下载。
+
 ## 公共电脑使用注意
 
 - 训练前关闭 SENTINEL，避免两个进程争抢显存。

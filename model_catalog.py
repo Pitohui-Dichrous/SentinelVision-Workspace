@@ -142,6 +142,17 @@ DEFAULT_CLASS_PROFILES: Mapping[str, ClassProfile] = {
         alert_enabled=False,
         color_rgb=(234, 179, 8),
     ),
+    # Logical output produced only by the optional PPE temporal pipeline.  It
+    # is not a model class and must never raise an alert by itself.
+    "ppe_uncertain": ClassProfile(
+        class_id="ppe_uncertain",
+        display_zh="PPE 待确认",
+        display_en="PPE Uncertain",
+        severity=None,
+        alert_enabled=False,
+        color_rgb=(148, 163, 184),
+        enabled_by_default=True,
+    ),
 }
 
 

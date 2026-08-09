@@ -26,6 +26,7 @@ Set-Location 'E:\SentinelVision_Workspace'
 - 工作库自带 Windows x64 Python 3.11.9、PyTorch 2.2.1+cu118、PySide6、完整训练依赖、离线修复包、便携 Git 和 GitHub CLI。
 - 已在 RTX 4080 Laptop 上通过 CUDA、自检、模型加载和多模型切换测试；目标公共电脑 RTX 4090 只需安装兼容 CUDA 11.8 的 NVIDIA 驱动，不需要另装 Python 或 CUDA Toolkit。
 - UI 已重做为现代深色工作台，包含“开始”“训练新模型”“审核与部署”“已部署模型”四页。原 SENTINEL 的已有视频、摄像头、告警、截图和检测功能均保留。
+- 检测台已加入可回退的 PPE 时序增强：`hat/person` 冲突消解、逻辑头部 Track ID、N-of-M/EMA/滞回、每 Track 风险状态机、Event ID 与结构化事件日志。旧设置默认仍使用兼容基线，Fire 暂时保留原路径。
 - 训练和检测代码均使用相对路径；交接前使用 Git 跟踪文件搜索确认，没有 `D:\python`、`D:/python` 或其他 D 盘路径硬编码。
 
 ## 模型训练与数据集
@@ -73,7 +74,11 @@ Set-Location 'E:\SentinelVision_Workspace'
 
 新发现的模型默认不勾选，未知类别默认只画框、不告警。类别重叠的模型默认不能同时选择，以免产生重复检测框和重复告警。未来用户添加新目标模型时，仍必须沿用动态扫描与“默认不选中”的规则，不能重新写死三个模型。
 
-当前本机设置文件 `.runtime/config/sentinel_settings.json` 中 `selected_model_ids` 为空，这表示记住了“暂不加载模型”的用户选择，不是模型丢失。用户可以在 SENTINEL 中自行勾选，程序会记住选择。多模型推理目前在同一个检测循环内顺序执行，会增加显存占用和单帧耗时；它不是多 CUDA 流并发实现。
+当前本机设置文件 `.runtime/config/sentinel_settings.json` 中选择的是 `COMBINED`。这只是当前电脑的用户选择，不是代码默认值；用户可以在 SENTINEL 中自行更改，程序会记住选择。多模型推理目前在同一个检测循环内顺序执行，会增加显存占用和单帧耗时；它不是多 CUDA 流并发实现。
+
+PPE 默认算法参数位于 `config/safety_pipeline.yaml`。当前本机 `.runtime/config/sentinel_settings.json` 仍为 schema 2、没有模式 override，因此使用兼容基线；用户首次保存分析设置后才会升级为 schema 3。低频风险转换、告警和人工复核追加到 `.runtime/events/ppe_events.jsonl`。配置无效时 UI 会 fail-closed 锁定基线。架构、配置、实验方法和课程设计摘要位于 `docs/`。
+
+不要把当前实验初值写成行业标准。Phase 6 Fire Temporal、Phase 7 Dynamic Risk、Phase 8 Hard Sample、Phase 9 Watchdog、Phase 11 自动优化和 Phase 12 Dynamic ROI 尚未实现；Phase 10 只完成指标/日志/实验协议基础，自动 trace、双重放与报告工具仍待后续。
 
 ## Git 与大文件边界
 
@@ -91,7 +96,7 @@ Set-Location 'E:\SentinelVision_Workspace'
 & '.\TOOLS\Git\cmd\git.exe' status --short
 ```
 
-修改后运行相应测试，再用：
+修改后先运行相应测试。只有用户明确要求提交或同步时，才分别使用：
 
 ```powershell
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File '.\portable\save_version.ps1' -Message '清晰的英文或中文提交说明' -NoPush
@@ -109,7 +114,8 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File '.\portable\sync_github.
 - 10 个预训练权重均能作为 checkpoint 读取，P5/P6 配置映射正确；
 - 训练安全边界、人工审核门禁、部署归档和动态 `RESULTS` 扫描通过测试；
 - 快速关键文件检查与完整环境自检通过；
-- 私有 GitHub 与本地 `main` 已同步，保护目录没有被提交。
+- PPE 纯算法、集成契约与离屏 UI 共 57 项 unittest 全部通过；
+- 当前 `main` 比 `origin/main` 领先 1 个既有 UI 提交，本轮 PPE 修改按用户规则保持未提交、未推送；保护目录没有进入 Git。
 
 ## 新账号继续工作时的原则
 
@@ -119,7 +125,7 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File '.\portable\sync_github.
 4. 不自动部署训练模型，不替用户决定模型已通过人工审核。
 5. 不恢复全库哈希、全盘遍历或大型 Git 提交。
 6. 新模型继续通过 `RESULTS` 动态扫描和复选框接入，并默认不选中。
-7. 修改完成后做相称测试、创建 Git 提交；只有已具备认证或用户要求同步时才推送。
+7. 修改完成后做相称测试；只有用户明确要求时才创建 Git 提交，只有用户明确要求同步时才推送。
 8. 当前没有已知阻塞性故障。接手后应先询问用户下一项具体研究或开发目标，不要无目的重构已经稳定运行的训练、部署和检测链。
 
 更详细的小白使用说明见 `START_HERE_CN.md`，便携运行机制见 `PORTABLE_GUIDE_CN.md`，Git 操作见 `GIT_GUIDE_CN.md`。
