@@ -1,5 +1,7 @@
 # SentinelVision 移动硬盘技术说明
 
+> 本文描述完整移动硬盘成品，而不是源码克隆或 Codex 临时工作树。完整成品必须包含 `RUNTIME`、`TOOLS`、`DATASETS`、`RESULTS` 和根目录 Windows 脚本；源码工作树缺少这些被 Git 忽略的资产时，只能维护源码与可用测试，不能作为便携运行验收。
+
 ## 日常入口
 
 双击 `START_HERE.cmd`。它会自动：
@@ -20,6 +22,8 @@
 - 已安装兼容 CUDA 11.8 的 NVIDIA 驱动。RTX 4080 Laptop、RTX 4090 均受支持；不需要另装 CUDA Toolkit。
 - 不要求安装 Python、pip、Git、开发工具或管理员权限，不要求联网。
 - 工作库建议至少保留 25 GB 空间，以便在运行时损坏时进行同盘离线重建。
+
+本地图片、视频、摄像头、训练、审核和已存在模型的检测均可离线运行。网络仅在使用网络摄像头/在线视频源、首次安装便携 Git 工具或首次 GitHub 授权与同步时需要；软件不能绕过单位对 USB 执行、网络访问或 GPU 驱动的安全策略。
 
 `RUNTIME/python` 是官方 Windows embeddable Python 与 cp311/win_amd64 依赖组成的独立应用运行时；`python311._pth` 只使用相对路径，不读取宿主 Python、注册表环境或用户 site-packages。PyTorch wheel 自带 CUDA 11.8、cuDNN 等用户态库。
 
@@ -69,4 +73,4 @@ SENTINEL 每次启动扫描 `RESULTS`，按复选框加载模型，不再存在 
 
 工作库自带便携 Git / GitHub CLI 安装脚本，不依赖公共电脑预装开发工具。Git 只跟踪可审查的源码、配置和文档；便携运行时、数据集、训练输出与模型二进制由 `.gitignore` 强制排除，避免 GitHub 100 MB 单文件限制和仓库膨胀。
 
-日常使用 `SAVE_VERSION.cmd` 保存本地版本，使用 `SYNC_GITHUB.cmd` 同步私有仓库。详情见 `GIT_GUIDE_CN.md`。
+日常使用 `SAVE_VERSION.cmd` 保存版本；若已授权 GitHub CLI，它会尝试同步。需要明确远端对齐时使用 `SYNC_GITHUB.cmd`。两者的暂存与推送条件见 `GIT_GUIDE_CN.md`。

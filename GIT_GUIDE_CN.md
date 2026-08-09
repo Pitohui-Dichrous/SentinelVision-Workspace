@@ -1,44 +1,69 @@
 # SentinelVision Git / GitHub 使用说明
 
-## 已采用的安全结构
+Git 只保存可审查的源码、脚本、配置和文档。运行时、模型、数据集、训练输出、用户设置和运行日志保留在工作库或 `.runtime`，由根目录 `.gitignore` 保护，绝不应加入 Git。
 
-Git 负责保存源码、界面、训练脚本、配置、文档和模型结构 YAML。GitHub 仓库为私有仓库：
+## 先确认工作环境
 
-`https://github.com/Pitohui-Dichrous/SentinelVision-Workspace`
+| 环境 | Git 工具来源 | 推荐方式 |
+| --- | --- | --- |
+| 完整便携工作库 | 优先使用 `TOOLS/Git/cmd/git.exe` 和 `TOOLS/GitHubCLI`。 | 使用根目录 `*.cmd` 脚本。 |
+| 源码克隆或临时工作树 | 便携工具可能不存在。 | 使用已安装的 Git，仅提交当前任务相关文件。 |
 
-下列内容仍完整保存在移动硬盘，但不会上传 GitHub：
+不要在已有克隆、临时工作树或已初始化的便携工作库中再次运行 `ENABLE_GIT.cmd`。它只用于一个复制出来、尚未初始化的完整便携工作库。
 
-- `RUNTIME`、`.runtime`、`TOOLS`：可移植 Python、CUDA 依赖和便携 Git 工具；
-- `DATASETS`、`data/datasets`、`data/firedata`：训练数据集；
-- `RESULTS`、`MODEL_ARCHIVE`、`TRAINING_OUTPUTS`、`runs`：模型权重、审核归档和训练输出；
-- 所有 `.pt`、`.onnx`、`.engine` 等大模型文件；
-- 运行日志、用户设置和临时检查报告。
+## 受保护内容
 
-这是必要限制，不是遗漏。GitHub 普通仓库拒绝单个超过 100 MB 的文件；把十几 GB 的便携 Python 和数据集塞进 Git 也会让仓库无法正常克隆。大文件继续由移动硬盘及用户现有备份保存。
+以下内容不属于 Git/GitHub，同步前后都不应删除、覆盖或手工加入暂存区：
 
-## 第一次启用
+- `RUNTIME`、`TOOLS`、`.runtime`；
+- `DATASETS` 与其他原始数据目录；
+- `PRETRAINED_WEIGHTS`、`RESULTS`、`MODEL_ARCHIVE`、`TRAINING_OUTPUTS`、`runs`；
+- `.pt`、`.onnx`、`.engine` 等模型二进制；
+- 日志、截图、实验 trace、用户设置、凭据和临时审核产物。
 
-只需依次双击：
+GitHub 的单文件限制与仓库体积限制只是附加原因；这些目录首先是运行与人工审核资产，不应被源码同步流程处理。
 
-1. `INSTALL_GIT_TOOLS.cmd`：把官方便携 Git 和 GitHub CLI 安装在本工作库的 `TOOLS` 中，不修改公共电脑；
-2. `ENABLE_GIT.cmd`：创建本地 Git 仓库和第一次提交；
-3. `SYNC_GITHUB.cmd`：第一次会打开浏览器进行 GitHub 授权，成功后自动推送到私有仓库。
+## 完整便携工作库：日常操作
 
-工作库已经完成 Git 初始化并补齐 10 个官方 YOLOv5 v7.0 目标检测权重。日常快速检查不会遍历十几 GB 数据集，也不会生成全库 SHA-256 清单。
+1. 双击 `GIT_STATUS.cmd` 查看当前分支、未保存修改和最近历史。
+2. 首次在一台没有盘内 Git 工具的电脑上使用时，双击 `INSTALL_GIT_TOOLS.cmd`。它只向工作库的 `TOOLS` 写入工具，不修改系统安装。
+3. 若这是一个全新复制的完整工作库且 Git 尚未初始化，才双击 `ENABLE_GIT.cmd`。
+4. 完成并核对修改后，双击 `SAVE_VERSION.cmd` 创建版本。
+5. 需要与 GitHub 对齐或第一次授权时，双击 `SYNC_GITHUB.cmd`。
 
-## 以后怎么用
+`SAVE_VERSION.cmd` 会暂存所有未被忽略的改动并创建提交；若本机已经有已授权的 GitHub CLI，它还会尝试推送。需要严格的仅本地提交时，请在 PowerShell 中运行：
 
-- 完成一次代码修改后，双击 `SAVE_VERSION.cmd`。它会自动创建带时间的版本；已经登录 GitHub 时也会自动推送。
-- 如果希望自己填写备注，双击 `SAVE_VERSION_WITH_MESSAGE.cmd`，输入本次修改内容后按回车。
-- 需要主动上传或从 GitHub 对齐时，双击 `SYNC_GITHUB.cmd`。
-- 想查看当前修改和最近版本时，双击 `GIT_STATUS.cmd`。
-- 数据集、训练结果和模型权重不会因 Git 操作被删除或覆盖。
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File '.\portable\save_version.ps1' -Message '说明本次修改' -NoPush
+```
 
-## 撤销或删除最近版本
+`SYNC_GITHUB.cmd` 会先保存受保护边界之外的未提交修改，再检查远端、必要时合并或变基并推送。因此在运行前先查看状态，处理你不希望纳入提交的文件；它不是只读命令。
 
-- `REVERT_LAST_COMMIT.cmd`：推荐使用。它不会删除历史，而是创建一个新的反向提交。再次运行可以撤销这个反向提交，例如 `A → B → C → R1 → R2`，其中 `R2` 会恢复 `C` 的内容。
-- `DELETE_LAST_COMMIT_HARD.cmd`：危险操作。它使用 `reset --hard HEAD~1` 删除最后一次提交；如果 GitHub `main` 正好指向同一提交，也会使用精确的 `force-with-lease` 将远端退回。脚本只允许在工作区完全干净时执行。
+首次同步会要求在浏览器完成 GitHub 授权。令牌由当前 Windows 凭据系统保存，不写入移动硬盘；公共电脑使用后应退出 GitHub 并清除该电脑的凭据。
 
-两个脚本都需要两次确认：先输入操作关键字，再输入窗口显示的当前 commit 短 ID。任何输入不匹配都会取消，并且不修改仓库。
+## 源码克隆或临时工作树：维护操作
 
-在公共电脑首次同步 GitHub 时也需要浏览器授权。登录令牌只由该电脑的 Windows 凭据系统保存，不写入移动硬盘；离开公共电脑前应退出 GitHub 账户并清除该电脑凭据。即使不登录 GitHub，`SAVE_VERSION.cmd` 仍会把版本安全保存在 E 盘的本地 Git 历史中。
+源码工作树通常不包含 `TOOLS`、`RUNTIME`、模型和数据。这是正常的 Git 忽略结果，不需要安装或复制这些目录来修改文档与代码。
+
+```powershell
+git status --short --branch
+git diff --check
+git add -- <本次任务文件>
+git diff --cached --name-only
+git commit -m '清晰的修改说明'
+```
+
+只在用户明确要求同步时执行 `git push`。不要把临时工作树的绝对路径、宿主工具路径或本机凭据写入项目文件。若工作树处于 detached HEAD，应先按维护平台的工作流创建或切换到合适分支，而不是初始化新仓库。
+
+## 撤销与恢复
+
+- `REVERT_LAST_COMMIT.cmd`：推荐。它创建反向提交，保留历史，适合已经共享的版本。
+- `DELETE_LAST_COMMIT_HARD.cmd`：危险。它只允许在工作区干净时删除最近一次提交；若远端正好指向该提交，可能以 `force-with-lease` 改写远端。
+
+两者均需要双重确认。除非用户明确要求且目标提交已核对，不要使用 `reset --hard`、强制推送或覆盖工作库。
+
+## 同步失败时
+
+推送被拒绝通常表示远端已有新提交。先获取远端状态并检查差异；使用 rebase 或合并时保留双方改动，重新运行相称测试后再推送。不要用强制推送覆盖远端，也不要把“本地已提交”说成“已经同步”。
+
+私有仓库地址：`https://github.com/Pitohui-Dichrous/SentinelVision-Workspace`。

@@ -10,3 +10,4 @@
 - New detection models must remain opt-in through the dynamic `RESULTS` scan and model check boxes.
 - Preserve the compatibility baseline for safety-pipeline research. Temporal PPE processing must remain explicitly switchable and must not silently replace old persisted behavior.
 - Keep runtime events, experiment traces, hard samples and health logs below `.runtime` so they remain outside Git.
+- When code, configuration, scripts or operating assumptions change, update the affected project documentation. Distinguish a complete portable runtime workspace from a source-only clone or temporary worktree; do not present unexecuted production checks as current evidence.

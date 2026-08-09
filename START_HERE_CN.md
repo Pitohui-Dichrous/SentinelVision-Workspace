@@ -1,5 +1,7 @@
 # SentinelVision 工作库使用说明
 
+> 本文只适用于包含 `RUNTIME`、`TOOLS`、数据集和生产模型的完整便携工作库。若当前目录是源码克隆或临时工作树，缺少这些被 Git 忽略的目录是正常现象；不要运行启动、环境重建或 Git 初始化脚本，请参阅 `README.md` 与 `GIT_GUIDE_CN.md`。
+
 ## 你只需要记住一个文件
 
 双击根目录中的 `START_HERE.cmd`。
@@ -107,9 +109,9 @@ SENTINEL 会把它显示为“新发现”。推荐随后使用工作台“审�
 
 源码、脚本、配置和文档由本地 Git 及私有 GitHub 仓库保护；模型、数据集、运行环境和训练输出因为体积及 GitHub 限制而保留在移动硬盘，不会误上传。
 
-- 修改完成后双击 `SAVE_VERSION.cmd`，自动保存一个版本；
-- 双击 `SYNC_GITHUB.cmd`，同步私有 GitHub；
+- 修改完成并确认后双击 `SAVE_VERSION.cmd`，保存一个版本；已授权 GitHub CLI 时该脚本还会尝试推送；
+- 需要明确与私有 GitHub 对齐时双击 `SYNC_GITHUB.cmd`；它可能先保存未提交的安全文件，因此先查看状态；
 - 双击 `GIT_STATUS.cmd`，查看未保存修改和最近历史；
 - 完整说明见 `GIT_GUIDE_CN.md`。
 
-第一次使用会由 `INSTALL_GIT_TOOLS.cmd` 在工作库中安装便携 Git，不修改电脑系统。公共电脑上的 GitHub 登录凭据不会写入移动硬盘。
+完整便携工作库首次缺少 Git 工具时，`INSTALL_GIT_TOOLS.cmd` 会在工作库中安装便携 Git，不修改电脑系统。公共电脑上的 GitHub 登录凭据不会写入移动硬盘。

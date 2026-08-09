@@ -20,12 +20,16 @@ if (-not (Test-Path -LiteralPath (Join-Path $target "SentinelVision4.py") -PathT
 }
 
 $files = @(
-    ".gitignore", ".gitattributes", "AGENTS.md", "GIT_GUIDE_CN.md",
+    ".gitignore", ".gitattributes", "AGENTS.md", "README.md",
+    "CODEX_HANDOFF_CN.md", "GIT_GUIDE_CN.md", "START_HERE_CN.md",
+    "PORTABLE_GUIDE_CN.md", "docs\ARCHITECTURE_CN.md",
+    "docs\TEMPORAL_PIPELINE_CONFIG_CN.md", "docs\EXPERIMENT_PROTOCOL_CN.md",
+    "docs\MASTER_PROJECT_TECHNICAL_SUMMARY_CN.md",
     "INSTALL_GIT_TOOLS.cmd", "ENABLE_GIT.cmd", "SAVE_VERSION.cmd",
     "SYNC_GITHUB.cmd", "GIT_STATUS.cmd", "DOWNLOAD_PRETRAINED_WEIGHTS.cmd",
     "project_paths.py", "pretrained_weights.py", "safe_train.py",
     "portable_check.py", "ui_theme.py", "workspace_manager.py",
-    "SentinelVision4.py", "START_HERE_CN.md", "PORTABLE_GUIDE_CN.md",
+    "SentinelVision4.py",
     "portable\git_common.ps1", "portable\install_git_tools.ps1",
     "portable\enable_git.ps1", "portable\save_version.ps1",
     "portable\git_status.ps1", "portable\sync_github.ps1",
@@ -54,4 +58,4 @@ if (Test-Path -LiteralPath $weightReadme -PathType Leaf) {
     Copy-Item -LiteralPath $weightReadme -Destination $weightTarget -Force
 }
 
-Write-Host "[OK] E-drive source upgrade copied. Datasets, RESULTS and runtimes were untouched."
+Write-Host "[OK] Target workspace source upgrade copied. Datasets, RESULTS and runtimes were untouched."
