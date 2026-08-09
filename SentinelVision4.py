@@ -31,7 +31,13 @@ from model_catalog import CatalogSnapshot, ClassProfile, ModelCatalog
 from model_runtime import ModelRuntime
 from project_paths import PROJECT_ROOT
 from ui_font import install_ui_font
-from ui_theme import build_stylesheet as build_app_stylesheet, set_property
+from ui_theme import (
+    PressableButton,
+    build_stylesheet as build_app_stylesheet,
+    reduce_motion_enabled,
+    set_property,
+    tokens as app_tokens,
+)
 
 # ---- 统一的告警ID生成器（毫秒*1000，极小概率如果同时触发两个警报，则赋予并发序号000/001/002...）----
 _ALERT_LAST_MS = 0
@@ -71,7 +77,7 @@ TOKENS_LIGHT = dict(
     success="#159A75", warn="#C78312", danger="#D74252", info="#2F6FED",
 )
 DARK = True
-REDUCE_MOTION = False
+REDUCE_MOTION = reduce_motion_enabled()
 
 # ===================== 使用者 / 权限 =====================
 RBAC_ENABLED = True
@@ -181,36 +187,11 @@ def point_in_polygon(pt, poly):
             inside = not inside
     return inside
 
-# ===================== 点击动画按钮 =====================
-class AnimatedButton(QtWidgets.QPushButton):
-    def __init__(self, *a, **kw):
-        super().__init__(*a, **kw)
-        self._scale = 1.0
-        self._anim = QtCore.QPropertyAnimation(self, b"scale", self)
-        self._anim.setDuration(140)
-        self._anim.setEasingCurve(QtCore.QEasingCurve.OutCubic)
-        eff = QtWidgets.QGraphicsDropShadowEffect(self)
-        eff.setBlurRadius(0); eff.setOffset(0, 2)
-        eff.setColor(qcolor(TOKENS_DARK["primary"], 160))
-        self.setGraphicsEffect(eff); self._glow = eff
-    def getScale(self): return self._scale
-    def setScale(self, v: float): self._scale = v; self.update()
-    scale = QtCore.Property(float, getScale, setScale)
-    def mousePressEvent(self, e):
-        if not REDUCE_MOTION:
-            self._anim.stop(); self._anim.setStartValue(self._scale); self._anim.setEndValue(0.96); self._anim.start()
-            self._glow.setBlurRadius(18)
-        super().mousePressEvent(e)
-    def mouseReleaseEvent(self, e):
-        if not REDUCE_MOTION:
-            self._anim.stop(); self._anim.setStartValue(self._scale); self._anim.setEndValue(1.0); self._anim.start()
-            QtCore.QTimer.singleShot(120, lambda: self._glow.setBlurRadius(0))
-        super().mouseReleaseEvent(e)
-    def paintEvent(self, ev):
-        p = QtGui.QPainter(self); p.setRenderHint(QtGui.QPainter.Antialiasing)
-        p.translate(self.rect().center()); p.scale(self._scale, self._scale); p.translate(-self.rect().center())
-        opt = QtWidgets.QStyleOptionButton(); opt.initFrom(self); opt.text = self.text(); opt.icon = self.icon()
-        self.style().drawControl(QtWidgets.QStyle.ControlElement.CE_PushButton, opt, p, self)
+# ===================== 统一按压反馈 =====================
+class AnimatedButton(PressableButton):
+    """Compatibility name backed by the shared pointer feedback primitive."""
+
+    pass
 
 QBtn = AnimatedButton
 
@@ -221,32 +202,36 @@ class ThemedComboBox(QtWidgets.QComboBox):
         self.setEditable(False); self.setMinimumHeight(36)
         self._apply_qss()
     def _apply_qss(self):
-        t = P()
+        t = app_tokens(DARK)
         self.setStyleSheet(f"""
             QComboBox {{
-                background:{t['bg2']}; color:{t['text']};
-                border:1px solid {t['line']}; border-radius:9px;
+                background:{t['glass_alt']}; color:{t['text']};
+                border:1px solid {t['hairline']}; border-radius:10px;
                 padding:5px 30px 5px 10px;
+            }}
+            QComboBox:focus {{
+                background:{t['glass_strong']};
+                border:2px solid {t['focus']};
             }}
             QComboBox::drop-down {{
                 width:24px; subcontrol-origin: padding; subcontrol-position: top right;
-                border-left: 1px solid {t['line']}; background:{t['bg2']};
-                border-top-right-radius:9px; border-bottom-right-radius:9px;
+                border-left: 1px solid {t['hairline']}; background:transparent;
+                border-top-right-radius:10px; border-bottom-right-radius:10px;
             }}
             QComboBox::down-arrow {{ image: none; width:0; height:0; }}
             QComboBox QAbstractItemView {{
-                background:{t['card']}; color:{t['text']};
-                border:1px solid {t['line']}; outline:0;
-                selection-background-color: {t['accentSoft']};
+                background:{t['surface']}; color:{t['text']};
+                border:1px solid {t['hairline_strong']};
+                selection-background-color: {t['primary_soft']};
                 selection-color: {t['text']};
             }}
         """)
     def paintEvent(self, e):
         super().paintEvent(e)
-        t = P(); p = QtGui.QPainter(self); p.setRenderHint(QtGui.QPainter.Antialiasing)
+        t = app_tokens(DARK); p = QtGui.QPainter(self); p.setRenderHint(QtGui.QPainter.Antialiasing)
         r = self.rect(); cx = r.right()-12; cy = r.center().y()
         tri = QtGui.QPolygonF([QtCore.QPointF(cx-5, cy-2), QtCore.QPointF(cx+5, cy-2), QtCore.QPointF(cx, cy+4)])
-        p.setBrush(qcolor(t["accent"])); p.setPen(QtCore.Qt.PenStyle.NoPen); p.drawPolygon(tri); p.end()
+        p.setBrush(QtGui.QColor(t["cyan"])); p.setPen(QtCore.Qt.PenStyle.NoPen); p.drawPolygon(tri); p.end()
     def apply_theme(self): self._apply_qss(); self.update()
 
 # ===================== 动态多模型推理线程 =====================
@@ -646,9 +631,6 @@ class VideoCanvas(QtWidgets.QWidget):
         self.masks: List[List[QtCore.QPointF]] = []
         self.active_list=None; self.active_index=-1
         self.dragging=(-1,-1)
-        self.reduce_motion = REDUCE_MOTION
-        self._ripples=[]; self._timer=QtCore.QTimer(self)
-        self._timer.timeout.connect(self.update); self._timer.start(16)
 
     def update_frame(self, qimg, w, h):
         self._qimg=qimg; self._src_w=w; self._src_h=h; self.update()
@@ -690,9 +672,6 @@ class VideoCanvas(QtWidgets.QWidget):
         else:
             x_frame, y_frame = int(e.position().x()), int(e.position().y())
 
-        if not self.reduce_motion:
-            self._ripples.append((QtCore.QPointF(e.position()), time.time()))
-
         if self.mode in ("add-roi","add-mask"):
             poly_list = self.rois if self.mode=="add-roi" else self.masks
             if self.active_list is not poly_list or self.active_index<0:
@@ -727,7 +706,9 @@ class VideoCanvas(QtWidgets.QWidget):
 
     def paintEvent(self, e):
         p = QtGui.QPainter(self); p.setRenderHint(QtGui.QPainter.Antialiasing)
-        t = P(); p.fillRect(self.rect(), qcolor(t["bg2"]))
+        # The image stage stays optically neutral in both app themes so video
+        # luminance and detection overlays are judged against a stable field.
+        p.fillRect(self.rect(), QtGui.QColor("#02090E"))
         rect, scale = self._fit_rect()
         if self._qimg: p.drawImage(rect, self._qimg)
 
@@ -753,17 +734,6 @@ class VideoCanvas(QtWidgets.QWidget):
         for poly in self.rois:  draw_poly(poly, P()["primary"], P()["primary"], 28)
         for poly in self.masks: draw_poly(poly, P()["danger"],  P()["danger"],  22)
 
-        if not self.reduce_motion and self._ripples:
-            now = time.time(); keep=[]
-            for pos, t0 in self._ripples:
-                dt = now - t0
-                if dt>0.6: continue
-                r = 60*dt/0.6; alpha = max(0, int(140*(1 - dt/0.6)))
-                pen = QtGui.QPen(qcolor(P()["accentSoft"], alpha)); pen.setWidth(2)
-                p.setPen(pen); p.setBrush(QtCore.Qt.BrushStyle.NoBrush)
-                p.drawEllipse(pos, r, r)
-                keep.append((pos,t0))
-            self._ripples = keep
         p.end()
 
 # ===================== 告警列表模型 =====================
@@ -803,8 +773,9 @@ class AlertsModel(QtCore.QAbstractListModel):
 class MainWindow(QtWidgets.QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle(APP_NAME)
-        self.resize(1400, 900)
+        self.setWindowTitle(f"{APP_NAME} — Detection Console")
+        self.resize(1520, 940)
+        self.setMinimumSize(1100, 720)
 
         # 状态
         self.lang_code = "zh"   # zh / en
@@ -816,209 +787,438 @@ class MainWindow(QtWidgets.QMainWindow):
         self.selected_model_ids = self._initial_model_selection()
         self._closing_after_worker = False
 
-        # 顶栏
-        self.toolbar = QtWidgets.QToolBar(); self.toolbar.setMovable(False)
+        # 顶栏：结构性重材质，状态与身份集中在右侧。
+        self.toolbar = QtWidgets.QToolBar()
+        self.toolbar.setMovable(False)
+        self.toolbar.setFloatable(False)
         self.toolbar.setObjectName("AppBar")
+        self.toolbar.setContextMenuPolicy(QtCore.Qt.ContextMenuPolicy.PreventContextMenu)
         self.addToolBar(QtCore.Qt.ToolBarArea.TopToolBarArea, self.toolbar)
         self.brand_mark = QtWidgets.QLabel("SV")
-        self.brand_mark.setProperty("badge", "primary")
+        self.brand_mark.setObjectName("BrandMark")
         self.brand_mark.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
-        self.brand_mark.setFixedSize(40, 30)
+        self.brand_mark.setFixedSize(42, 34)
         self.title = QtWidgets.QLabel(APP_NAME)
         self.title.setProperty("textRole", "brand")
         self.sub   = QtWidgets.QLabel(SUBTITLE)
-        self.sub.setProperty("textRole", "muted")
+        self.sub.setProperty("textRole", "caption")
+        brand_copy = QtWidgets.QVBoxLayout()
+        brand_copy.setContentsMargins(0, 0, 0, 0)
+        brand_copy.setSpacing(0)
+        brand_copy.addWidget(self.title)
+        brand_copy.addWidget(self.sub)
+        brand_block = QtWidgets.QWidget()
+        brand_block.setLayout(brand_copy)
+
+        self.system_badge = QtWidgets.QLabel("LOCAL · OFFLINE")
+        self.system_badge.setProperty("badge", "primary")
+        self.system_badge.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
         self.lbl_fps = QtWidgets.QLabel("FPS —")
         self.lbl_fps.setProperty("badge", "neutral")
         self.lbl_fps.setMinimumWidth(76)
         self.lbl_fps.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
-        self.btn_theme = QBtn("主题"); self.btn_theme.clicked.connect(self.toggle_theme)
-        self.btn_rm    = QBtn("动效"); self.btn_rm.clicked.connect(self.toggle_reduce_motion)
+        self.btn_theme = QBtn("主题")
+        self.btn_theme.clicked.connect(self.toggle_theme)
+        self.btn_rm = QBtn("动效")
+        self.btn_rm.clicked.connect(self.toggle_reduce_motion)
         self.btn_theme.setProperty("variant", "ghost")
         self.btn_rm.setProperty("variant", "ghost")
-        self.lang = ThemedComboBox(); self.lang.addItems(["zh-CN","en-NZ"])
-        self.role = ThemedComboBox(); self.role.addItems(["Viewer","Operator","Admin"]); self.role.setCurrentText(DEFAULT_ROLE)
+        self.btn_theme.setToolTip("切换明暗主题")
+        self.btn_rm.setToolTip("减少非必要位移动效")
+        self.lang = ThemedComboBox()
+        self.lang.addItems(["zh-CN", "en-NZ"])
+        self.lang.setFixedWidth(94)
+        self.role = ThemedComboBox()
+        self.role.addItems(["Viewer", "Operator", "Admin"])
+        self.role.setCurrentText(DEFAULT_ROLE)
+        self.role.setFixedWidth(108)
         self.role.currentTextChanged.connect(self.apply_role)
         self.lang.currentTextChanged.connect(self.on_language_change)
 
-        self.toolbar.addWidget(self.brand_mark); self.toolbar.addWidget(self.title); self.toolbar.addWidget(self.sub)
+        self.toolbar.addWidget(self.brand_mark)
+        self.toolbar.addWidget(brand_block)
         self.toolbar.addWidget(self._spacer())
+        self.toolbar.addWidget(self.system_badge)
         self.toolbar.addWidget(self.lbl_fps)
-        for w in (self.btn_theme, self.btn_rm, self.lang, self.role): self.toolbar.addWidget(w)
+        for widget in (self.btn_theme, self.btn_rm, self.lang, self.role):
+            self.toolbar.addWidget(widget)
 
-        # 中心布局
+        # 中心布局：检测画布与 Inspector 两个同级区域，无整列嵌套滚动。
         central = QtWidgets.QWidget()
         central.setObjectName("AppShell")
         central_layout = QtWidgets.QVBoxLayout(central)
-        central_layout.setContentsMargins(16,16,16,16)
+        central_layout.setContentsMargins(14, 14, 14, 14)
         central_layout.setSpacing(0)
         self.main_splitter = QtWidgets.QSplitter(QtCore.Qt.Orientation.Horizontal)
         self.main_splitter.setChildrenCollapsible(False)
+        self.main_splitter.setHandleWidth(10)
 
-        # 左：监控区
-        left_card = self._card(); L = QtWidgets.QGridLayout(left_card); L.setContentsMargins(12,12,12,12)
-        L.setHorizontalSpacing(8); L.setVerticalSpacing(9)
+        # 主域：视频画布。
+        self.viewport_card = self._card("ViewportFrame", "strong")
+        L = QtWidgets.QVBoxLayout(self.viewport_card)
+        L.setContentsMargins(16, 15, 16, 16)
+        L.setSpacing(12)
         monitor_header = QtWidgets.QHBoxLayout()
-        self.monitor_title = QtWidgets.QLabel("实时监控")
-        self.monitor_title.setProperty("textRole", "sectionTitle")
+        monitor_header.setSpacing(10)
+        monitor_copy = QtWidgets.QVBoxLayout()
+        monitor_copy.setContentsMargins(0, 0, 0, 0)
+        monitor_copy.setSpacing(2)
+        self.monitor_eyebrow = QtWidgets.QLabel("LIVE DETECTION")
+        self.monitor_eyebrow.setProperty("textRole", "eyebrow")
+        self.monitor_title = QtWidgets.QLabel("实时检测")
+        self.monitor_title.setProperty("textRole", "pageTitle")
+        monitor_copy.addWidget(self.monitor_eyebrow)
+        monitor_copy.addWidget(self.monitor_title)
         self.live_badge = QtWidgets.QLabel("●  STANDBY")
         self.live_badge.setProperty("badge", "neutral")
         self.source_state = QtWidgets.QLabel("等待选择视频源")
-        self.source_state.setProperty("textRole", "muted")
-        monitor_header.addWidget(self.monitor_title)
-        monitor_header.addWidget(self.live_badge)
+        self.source_state.setObjectName("SourceState")
+        self.source_state.setProperty("textRole", "body")
+        self.source_state.setAlignment(QtCore.Qt.AlignmentFlag.AlignRight | QtCore.Qt.AlignmentFlag.AlignVCenter)
+        self.source_state.setTextInteractionFlags(QtCore.Qt.TextInteractionFlag.TextSelectableByMouse)
+        monitor_header.addLayout(monitor_copy)
         monitor_header.addStretch(1)
+        monitor_header.addWidget(self.live_badge)
         monitor_header.addWidget(self.source_state)
-        L.addLayout(monitor_header, 0, 0, 1, 5)
-        self.canvas = VideoCanvas(); L.addWidget(self.canvas, 1, 0, 1, 5)
-        self.btn_play  = QBtn("播放"); self.btn_pause = QBtn("暂停"); self.btn_stop  = QBtn("停止")
+        L.addLayout(monitor_header)
+
+        self.canvas = VideoCanvas()
+        self.canvas.setMinimumHeight(420)
+        self.canvas.setToolTip("单击放置区域顶点，双击闭合；编辑模式下可拖动顶点")
+        L.addWidget(self.canvas, 1)
+
+        # 来源与 transport 合并为靠近画布的操作条。
+        self.transport_bar = self._card("TransportBar", "subtle")
+        transport = QtWidgets.QHBoxLayout(self.transport_bar)
+        transport.setContentsMargins(12, 9, 12, 9)
+        transport.setSpacing(8)
+        self.transport_label = QtWidgets.QLabel("来源与播放")
+        self.transport_label.setProperty("textRole", "fieldLabel")
+        self.src_quick = ThemedComboBox()
+        self.src_quick.setMinimumWidth(230)
+        self.src_quick.setSizePolicy(QtWidgets.QSizePolicy.Policy.Expanding, QtWidgets.QSizePolicy.Policy.Fixed)
+        self.btn_play = QBtn("播放")
+        self.btn_pause = QBtn("暂停")
+        self.btn_stop = QBtn("停止")
         self.btn_play.clicked.connect(lambda: self.worker.set_paused(False))
         self.btn_pause.clicked.connect(lambda: self.worker.set_paused(True))
         self.btn_stop.clicked.connect(self.stop_source)
-        self.src_quick = ThemedComboBox(); self.src_quick.setMinimumWidth(260)
         self.btn_play.setProperty("variant", "primary")
+        self.btn_pause.setProperty("variant", "secondary")
         self.btn_stop.setProperty("variant", "danger")
-        L.addWidget(self.btn_play,  2, 1); L.addWidget(self.btn_pause, 2, 2); L.addWidget(self.btn_stop,  2, 3); L.addWidget(self.src_quick, 2, 4)
+        self.btn_play.setMinimumWidth(72)
+        self.btn_pause.setMinimumWidth(72)
+        self.btn_stop.setMinimumWidth(72)
+        transport.addWidget(self.transport_label)
+        transport.addWidget(self.src_quick, 1)
+        transport.addWidget(self.btn_play)
+        transport.addWidget(self.btn_pause)
+        transport.addWidget(self.btn_stop)
+        L.addWidget(self.transport_bar)
 
-        self.btn_add_roi   = QBtn();  self.btn_add_mask = QBtn(); self.btn_edit_poly = QBtn(); self.btn_clear_poly= QBtn()
-        self.btn_add_roi.clicked.connect(lambda:self._set_edit_mode("add-roi"))
-        self.btn_add_mask.clicked.connect(lambda:self._set_edit_mode("add-mask"))
-        self.btn_edit_poly.clicked.connect(lambda:self._set_edit_mode("edit"))
+        # 区域工具独立成低权重操作条，不与 transport 争夺主操作。
+        self.region_bar = self._card("RegionBar", "subtle")
+        region = QtWidgets.QHBoxLayout(self.region_bar)
+        region.setContentsMargins(12, 8, 12, 8)
+        region.setSpacing(8)
+        self.regions_label = QtWidgets.QLabel("分析区域")
+        self.regions_label.setProperty("textRole", "fieldLabel")
+        self.regions_hint = QtWidgets.QLabel("ROI 参与检测；屏蔽区会被忽略")
+        self.regions_hint.setProperty("textRole", "caption")
+        self.btn_add_roi = QBtn()
+        self.btn_add_mask = QBtn()
+        self.btn_edit_poly = QBtn()
+        self.btn_clear_poly = QBtn()
+        for button in (self.btn_add_roi, self.btn_add_mask, self.btn_edit_poly, self.btn_clear_poly):
+            button.setProperty("variant", "quiet")
+        self.btn_add_roi.clicked.connect(lambda: self._set_edit_mode("add-roi"))
+        self.btn_add_mask.clicked.connect(lambda: self._set_edit_mode("add-mask"))
+        self.btn_edit_poly.clicked.connect(lambda: self._set_edit_mode("edit"))
         self.btn_clear_poly.clicked.connect(self._clear_polys)
-        L.addWidget(self.btn_add_roi,  3, 1); L.addWidget(self.btn_add_mask, 3, 2); L.addWidget(self.btn_edit_poly, 3, 3); L.addWidget(self.btn_clear_poly, 3, 4)
+        region.addWidget(self.regions_label)
+        region.addWidget(self.regions_hint)
+        region.addStretch(1)
+        region.addWidget(self.btn_add_roi)
+        region.addWidget(self.btn_add_mask)
+        region.addWidget(self.btn_edit_poly)
+        region.addWidget(self.btn_clear_poly)
+        L.addWidget(self.region_bar)
 
-        # 右：源/阈值/模式/时间轴
-        right_col = QtWidgets.QVBoxLayout(); right_col.setSpacing(10)
+        # Inspector：来源、检测配置、事件复核按任务分层。
+        self.inspector_panel = self._card("InspectorFrame", "strong")
+        self.inspector_panel.setMinimumWidth(380)
+        self.inspector_panel.setMaximumWidth(500)
+        inspector = QtWidgets.QVBoxLayout(self.inspector_panel)
+        inspector.setContentsMargins(14, 15, 14, 14)
+        inspector.setSpacing(10)
+        self.inspector_eyebrow = QtWidgets.QLabel("INSPECTOR")
+        self.inspector_eyebrow.setProperty("textRole", "eyebrow")
+        self.inspector_title = QtWidgets.QLabel("检测控制")
+        self.inspector_title.setProperty("textRole", "sectionTitle")
+        inspector.addWidget(self.inspector_eyebrow)
+        inspector.addWidget(self.inspector_title)
+        self.inspector_tabs = QtWidgets.QTabWidget()
+        self.inspector_tabs.setObjectName("InspectorTabs")
+        self.inspector_tabs.setDocumentMode(True)
+        self.inspector_tabs.setUsesScrollButtons(False)
+        inspector.addWidget(self.inspector_tabs, 1)
 
-        # 源管理
-        src_card = self._card(); S = QtWidgets.QGridLayout(src_card); S.setContentsMargins(12,12,12,12)
-        S.setHorizontalSpacing(8); S.setVerticalSpacing(8)
+        # 来源页。
+        self.source_tab = QtWidgets.QWidget()
+        S = QtWidgets.QVBoxLayout(self.source_tab)
+        S.setContentsMargins(14, 16, 14, 14)
+        S.setSpacing(10)
         self.source_title = QtWidgets.QLabel("视频源")
         self.source_title.setProperty("textRole", "sectionTitle")
-        self.btn_file = QBtn(); self.btn_file.clicked.connect(self.pick_file)
-        self.txt_url  = QtWidgets.QLineEdit()
-        self.btn_load = QBtn(); self.btn_load.clicked.connect(self.load_url)
-        self.btn_webcam = QBtn(); self.btn_webcam.clicked.connect(lambda:self.set_source(0, "webcam"))
-        self.btn_demo1  = QBtn(); self.btn_demo1.clicked.connect(lambda:self.set_source("https://media.istockphoto.com/id/1272087364/video/4k-firefighters-extinguish-a-fire-in-oil-refinery-plant.mp4?s=mp4-640x640-is&k=20&c=INonYLBCKuPgbTXfs-eSe4JlhuGEAVykvm10GaVnO6E=","http"))
-        self.btn_demo2  = QBtn(); self.btn_demo2.clicked.connect(lambda:self.set_source("https://media.istockphoto.com/id/615753036/video/factory-worker-in-blue-uniform-is-putting-his-hard-hat-and-goggles-on-while-walking.mp4?s=mp4-640x640-is&k=20&c=ghY3U2O5e4eKoMoY-Oh8pscFBGUACy2HZAKTW99XNKM=","http"))
-        S.addWidget(self.source_title, 0, 0, 1, 2)
-        S.addWidget(self.btn_file, 1, 0, 1, 2)
-        S.addWidget(self.txt_url,  2, 0, 1, 1); S.addWidget(self.btn_load, 2, 1, 1, 1)
-        S.addWidget(self.btn_webcam, 3, 0, 1, 1); S.addWidget(self.btn_demo1, 3, 1, 1, 1)
-        S.addWidget(self.btn_demo2, 4, 0, 1, 1)
+        self.source_helper = QtWidgets.QLabel("选择本地视频、设备或网络流；输入不会上传。")
+        self.source_helper.setWordWrap(True)
+        self.source_helper.setProperty("textRole", "body")
+        self.btn_file = QBtn()
+        self.btn_file.setProperty("variant", "primary")
+        self.btn_file.clicked.connect(self.pick_file)
+        self.source_url_label = QtWidgets.QLabel("网络地址")
+        self.source_url_label.setProperty("textRole", "fieldLabel")
+        self.txt_url = QtWidgets.QLineEdit()
+        self.btn_load = QBtn()
+        self.btn_load.setProperty("variant", "secondary")
+        self.btn_load.clicked.connect(self.load_url)
+        url_row = QtWidgets.QHBoxLayout()
+        url_row.setSpacing(8)
+        url_row.addWidget(self.txt_url, 1)
+        url_row.addWidget(self.btn_load)
+        self.source_quick_label = QtWidgets.QLabel("快速来源")
+        self.source_quick_label.setProperty("textRole", "fieldLabel")
+        self.btn_webcam = QBtn()
+        self.btn_webcam.clicked.connect(lambda: self.set_source(0, "webcam"))
+        self.btn_demo1 = QBtn()
+        self.btn_demo1.clicked.connect(lambda: self.set_source("https://media.istockphoto.com/id/1272087364/video/4k-firefighters-extinguish-a-fire-in-oil-refinery-plant.mp4?s=mp4-640x640-is&k=20&c=INonYLBCKuPgbTXfs-eSe4JlhuGEAVykvm10GaVnO6E=", "http"))
+        self.btn_demo2 = QBtn()
+        self.btn_demo2.clicked.connect(lambda: self.set_source("https://media.istockphoto.com/id/615753036/video/factory-worker-in-blue-uniform-is-putting-his-hard-hat-and-goggles-on-while-walking.mp4?s=mp4-640x640-is&k=20&c=ghY3U2O5e4eKoMoY-Oh8pscFBGUACy2HZAKTW99XNKM=", "http"))
+        self.demo_toggle = QtWidgets.QToolButton()
+        self.demo_toggle.setCheckable(True)
+        self.demo_toggle.setChecked(False)
+        self.demo_toggle.setArrowType(QtCore.Qt.ArrowType.RightArrow)
+        self.demo_toggle.setToolButtonStyle(QtCore.Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
+        self.demo_toggle.setProperty("variant", "ghost")
+        self.demo_toggle.toggled.connect(self._set_demo_sources_visible)
+        self.demo_sources_panel = QtWidgets.QFrame()
+        self.demo_sources_panel.setProperty("surface", "soft")
+        demo_layout = QtWidgets.QGridLayout(self.demo_sources_panel)
+        demo_layout.setContentsMargins(9, 9, 9, 9)
+        demo_layout.setSpacing(8)
+        demo_layout.addWidget(self.btn_demo1, 0, 0)
+        demo_layout.addWidget(self.btn_demo2, 0, 1)
+        self.demo_sources_panel.setVisible(False)
+        S.addWidget(self.source_title)
+        S.addWidget(self.source_helper)
+        S.addSpacing(4)
+        S.addWidget(self.btn_file)
+        S.addSpacing(4)
+        S.addWidget(self.source_url_label)
+        S.addLayout(url_row)
+        S.addSpacing(4)
+        S.addWidget(self.source_quick_label)
+        S.addWidget(self.btn_webcam)
+        S.addWidget(self.demo_toggle)
+        S.addWidget(self.demo_sources_panel)
+        S.addStretch(1)
 
-        # 阈值、动态模型、动态类别
-        cfg_card = self._card(); C = QtWidgets.QGridLayout(cfg_card); C.setContentsMargins(12,12,12,12)
+        # 检测页：模型、阈值与目标类别是一个连续配置任务。
+        self.detection_tab = QtWidgets.QWidget()
+        C = QtWidgets.QGridLayout(self.detection_tab)
+        C.setContentsMargins(14, 16, 14, 14)
+        C.setHorizontalSpacing(8)
+        C.setVerticalSpacing(9)
         self.lbl_model = QtWidgets.QLabel()
+        self.lbl_model.setProperty("textRole", "sectionTitle")
         self.lbl_model_summary = QtWidgets.QLabel()
         self.lbl_model_summary.setObjectName("MutedLabel")
+        self.lbl_model_summary.setWordWrap(True)
         self.btn_rescan_models = QBtn("重新扫描 RESULTS")
+        self.btn_rescan_models.setProperty("variant", "quiet")
         self.btn_rescan_models.clicked.connect(self._rescan_models)
-        self.s_conf = QtWidgets.QSlider(QtCore.Qt.Horizontal); self.s_conf.setRange(5,95)
+        self.s_conf = QtWidgets.QSlider(QtCore.Qt.Orientation.Horizontal)
+        self.s_conf.setRange(5, 95)
         default_conf = 25
         default_iou  = 45
         self.s_conf.setValue(default_conf)
-        self.v_conf = QtWidgets.QDoubleSpinBox(); self.v_conf.setRange(0.05,0.95); self.v_conf.setDecimals(2); self.v_conf.setSingleStep(0.01); self.v_conf.setValue(self.s_conf.value()/100)
-        self.s_iou  = QtWidgets.QSlider(QtCore.Qt.Horizontal); self.s_iou.setRange(10,90)
+        self.v_conf = QtWidgets.QDoubleSpinBox()
+        self.v_conf.setRange(0.05, 0.95)
+        self.v_conf.setDecimals(2)
+        self.v_conf.setSingleStep(0.01)
+        self.v_conf.setValue(self.s_conf.value() / 100)
+        self.s_iou = QtWidgets.QSlider(QtCore.Qt.Orientation.Horizontal)
+        self.s_iou.setRange(10, 90)
         self.s_iou.setValue(default_iou)
-        self.v_iou  = QtWidgets.QDoubleSpinBox(); self.v_iou.setRange(0.10,0.90); self.v_iou.setDecimals(2); self.v_iou.setSingleStep(0.01); self.v_iou.setValue(self.s_iou.value()/100)
-        self.s_conf.valueChanged.connect(lambda v:self.v_conf.setValue(v/100.0))
-        self.v_conf.valueChanged.connect(lambda x:self.s_conf.setValue(int(round(x*100))))
-        self.s_iou.valueChanged.connect(lambda v:self.v_iou.setValue(v/100.0))
-        self.v_iou.valueChanged.connect(lambda x:self.s_iou.setValue(int(round(x*100))))
-        self.v_conf.valueChanged.connect(self._apply_thresholds); self.v_iou.valueChanged.connect(self._apply_thresholds)
+        self.v_iou = QtWidgets.QDoubleSpinBox()
+        self.v_iou.setRange(0.10, 0.90)
+        self.v_iou.setDecimals(2)
+        self.v_iou.setSingleStep(0.01)
+        self.v_iou.setValue(self.s_iou.value() / 100)
+        self.s_conf.valueChanged.connect(lambda value: self.v_conf.setValue(value / 100.0))
+        self.v_conf.valueChanged.connect(lambda value: self.s_conf.setValue(int(round(value * 100))))
+        self.s_iou.valueChanged.connect(lambda value: self.v_iou.setValue(value / 100.0))
+        self.v_iou.valueChanged.connect(lambda value: self.s_iou.setValue(int(round(value * 100))))
+        self.v_conf.valueChanged.connect(self._apply_thresholds)
+        self.v_iou.valueChanged.connect(self._apply_thresholds)
 
-        row=0
-        C.addWidget(self.lbl_model, row,0,1,2)
-        C.addWidget(self.btn_rescan_models, row,2,1,1); row+=1
-        C.addWidget(self.lbl_model_summary, row,0,1,3); row+=1
+        row = 0
+        C.addWidget(self.lbl_model, row, 0, 1, 2)
+        C.addWidget(self.btn_rescan_models, row, 2)
+        row += 1
+        C.addWidget(self.lbl_model_summary, row, 0, 1, 3)
+        row += 1
         self.model_list_widget = QtWidgets.QWidget()
         self.model_list_layout = QtWidgets.QVBoxLayout(self.model_list_widget)
-        self.model_list_layout.setContentsMargins(0,0,0,0)
+        self.model_list_layout.setContentsMargins(0, 0, 0, 0)
         self.model_list_layout.setSpacing(5)
         self.model_scroll = QtWidgets.QScrollArea()
         self.model_scroll.setWidgetResizable(True)
         self.model_scroll.setFrameShape(QtWidgets.QFrame.Shape.NoFrame)
-        self.model_scroll.setMinimumHeight(125)
-        self.model_scroll.setMaximumHeight(180)
+        self.model_scroll.setMinimumHeight(138)
+        self.model_scroll.setMaximumHeight(200)
         self.model_scroll.setWidget(self.model_list_widget)
-        C.addWidget(self.model_scroll, row,0,1,3); row+=1
-        self.lbl_conf = QtWidgets.QLabel(); C.addWidget(self.lbl_conf, row,0); C.addWidget(self.s_conf, row,1); C.addWidget(self.v_conf, row,2); row+=1
-        self.lbl_iou  = QtWidgets.QLabel(); C.addWidget(self.lbl_iou,  row,0); C.addWidget(self.s_iou,  row,1); C.addWidget(self.v_iou,  row,2); row+=1
-        C.addWidget(self._hline(), row,0,1,3); row+=1
+        C.addWidget(self.model_scroll, row, 0, 1, 3)
+        row += 1
+        C.addWidget(self._hline(), row, 0, 1, 3)
+        row += 1
+        self.threshold_title = QtWidgets.QLabel("检测灵敏度")
+        self.threshold_title.setProperty("textRole", "sectionTitle")
+        C.addWidget(self.threshold_title, row, 0, 1, 3)
+        row += 1
+        self.lbl_conf = QtWidgets.QLabel()
+        self.lbl_conf.setProperty("textRole", "fieldLabel")
+        C.addWidget(self.lbl_conf, row, 0)
+        C.addWidget(self.s_conf, row, 1)
+        C.addWidget(self.v_conf, row, 2)
+        row += 1
+        self.lbl_iou = QtWidgets.QLabel()
+        self.lbl_iou.setProperty("textRole", "fieldLabel")
+        C.addWidget(self.lbl_iou, row, 0)
+        C.addWidget(self.s_iou, row, 1)
+        C.addWidget(self.v_iou, row, 2)
+        row += 1
+        C.addWidget(self._hline(), row, 0, 1, 3)
+        row += 1
         self.lbl_classes = QtWidgets.QLabel()
-        C.addWidget(self.lbl_classes, row,0,1,3); row+=1
+        self.lbl_classes.setProperty("textRole", "sectionTitle")
+        C.addWidget(self.lbl_classes, row, 0, 1, 3)
+        row += 1
         self.class_list_widget = QtWidgets.QWidget()
         self.class_list_layout = QtWidgets.QGridLayout(self.class_list_widget)
-        self.class_list_layout.setContentsMargins(0,0,0,0)
+        self.class_list_layout.setContentsMargins(0, 0, 0, 0)
+        self.class_list_layout.setHorizontalSpacing(10)
+        self.class_list_layout.setVerticalSpacing(6)
         self.class_scroll = QtWidgets.QScrollArea()
         self.class_scroll.setWidgetResizable(True)
         self.class_scroll.setFrameShape(QtWidgets.QFrame.Shape.NoFrame)
-        self.class_scroll.setMaximumHeight(100)
+        self.class_scroll.setMinimumHeight(88)
+        self.class_scroll.setMaximumHeight(145)
         self.class_scroll.setWidget(self.class_list_widget)
-        C.addWidget(self.class_scroll, row,0,1,3); row+=1
+        C.addWidget(self.class_scroll, row, 0, 1, 3)
+        C.setRowStretch(row, 1)
         self.model_checks = {}
         self.model_status_labels = {}
         self.class_checks = {}
         self._rebuild_model_controls()
         self._rebuild_class_controls()
 
-        # 告警时间轴
-        timeline_card = self._card(); T = QtWidgets.QGridLayout(timeline_card); T.setContentsMargins(12,12,12,12)
+        # 事件页：时间轴与人工复核入口。
+        self.events_tab = QtWidgets.QWidget()
+        T = QtWidgets.QGridLayout(self.events_tab)
+        T.setContentsMargins(14, 16, 14, 14)
+        T.setHorizontalSpacing(8)
+        T.setVerticalSpacing(9)
         self.timeline_title = QtWidgets.QLabel()
+        self.timeline_title.setProperty("textRole", "sectionTitle")
+        self.timeline_hint = QtWidgets.QLabel("选择事件可打开详情并记录人工结论。")
+        self.timeline_hint.setWordWrap(True)
+        self.timeline_hint.setProperty("textRole", "body")
+        self.alert_count_badge = QtWidgets.QLabel("0")
+        self.alert_count_badge.setProperty("badge", "neutral")
+        self.alert_count_badge.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
         self.alerts_model = AlertsModel(lambda: self.lang_code)
-        self.list_alerts = QtWidgets.QListView(); self.list_alerts.setModel(self.alerts_model)
+        self.list_alerts = QtWidgets.QListView()
+        self.list_alerts.setModel(self.alerts_model)
         self.list_alerts.setWordWrap(True)
         self.list_alerts.setSpacing(3)
-        self.list_alerts.setMinimumHeight(190)
+        self.list_alerts.setMinimumHeight(320)
         self.list_alerts.clicked.connect(self._open_alert_detail)
-        self.btn_clear_alerts = QBtn(); self.btn_clear_alerts.clicked.connect(self._clear_alerts)
-        self.btn_export_csv   = QBtn(); self.btn_export_json  = QBtn()
-        self.btn_export_csv.clicked.connect(self._export_csv); self.btn_export_json.clicked.connect(self._export_json)
-        T.addWidget(self.timeline_title, 0,0,1,3)
-        T.addWidget(self.list_alerts, 1,0,1,3)
-        T.addWidget(self.btn_clear_alerts, 2,0); T.addWidget(self.btn_export_csv, 2,1); T.addWidget(self.btn_export_json, 2,2)
+        self.btn_clear_alerts = QBtn()
+        self.btn_clear_alerts.setProperty("variant", "danger")
+        self.btn_clear_alerts.clicked.connect(self._clear_alerts)
+        self.btn_export_csv = QBtn()
+        self.btn_export_json = QBtn()
+        self.btn_export_csv.setProperty("variant", "secondary")
+        self.btn_export_json.setProperty("variant", "secondary")
+        self.btn_export_csv.clicked.connect(self._export_csv)
+        self.btn_export_json.clicked.connect(self._export_json)
+        T.addWidget(self.timeline_title, 0, 0, 1, 2)
+        T.addWidget(self.alert_count_badge, 0, 2)
+        T.addWidget(self.timeline_hint, 1, 0, 1, 3)
+        T.addWidget(self.list_alerts, 2, 0, 1, 3)
+        T.addWidget(self.btn_clear_alerts, 3, 0)
+        T.addWidget(self.btn_export_csv, 3, 1)
+        T.addWidget(self.btn_export_json, 3, 2)
+        T.setRowStretch(2, 1)
 
-        # 右列组合：整体可滚动，兼容 768p 和 Windows 高 DPI。
-        right_col.addWidget(src_card); right_col.addWidget(cfg_card); right_col.addWidget(timeline_card)
-        right_col.addStretch(1)
-        containerR = QtWidgets.QWidget(); containerR.setLayout(right_col)
-        containerR.setMinimumWidth(310)
-        right_scroll = QtWidgets.QScrollArea()
-        right_scroll.setWidgetResizable(True)
-        right_scroll.setFrameShape(QtWidgets.QFrame.Shape.NoFrame)
-        right_scroll.setHorizontalScrollBarPolicy(QtCore.Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        right_scroll.setWidget(containerR)
-        right_scroll.setMinimumWidth(330)
-        right_scroll.setMaximumWidth(460)
-        self.main_splitter.addWidget(left_card)
-        self.main_splitter.addWidget(right_scroll)
+        self.inspector_tabs.addTab(self.source_tab, "来源")
+        self.inspector_tabs.addTab(self.detection_tab, "检测")
+        self.inspector_tabs.addTab(self.events_tab, "事件")
+
+        self.main_splitter.addWidget(self.viewport_card)
+        self.main_splitter.addWidget(self.inspector_panel)
         self.main_splitter.setStretchFactor(0, 1)
         self.main_splitter.setStretchFactor(1, 0)
-        self.main_splitter.setSizes([980, 400])
+        self.main_splitter.setSizes([1060, 420])
         central_layout.addWidget(self.main_splitter)
         self.setCentralWidget(central)
 
-        # 抽屉
+        # 告警详情抽屉：固定尺寸，仅平移以避免逐帧重排内容。
         self.drawer = QtWidgets.QFrame(self)
-        self.drawer.setGeometry(self.width(), 0, 0, self.height()); self.drawer.raise_()
+        self.drawer.setObjectName("AlertDrawer")
+        self.drawer.setProperty("glass", "strong")
+        self.drawer.setAttribute(QtCore.Qt.WidgetAttribute.WA_StyledBackground, True)
+        initial_drawer_width = min(520, max(380, self.width() - 48))
+        self.drawer.resize(initial_drawer_width, self.height())
+        self.drawer.move(self.width(), 0)
+        self.drawer.raise_()
         self.drawer_open = False
-        self.drawer_anim = QtCore.QPropertyAnimation(self.drawer, b"geometry"); self.drawer_anim.setDuration(240)
+        self.drawer_anim = QtCore.QPropertyAnimation(self.drawer, b"pos")
+        self.drawer_anim.setDuration(220)
         self.drawer_anim.setEasingCurve(QtCore.QEasingCurve.Type.OutCubic)
-        self.drawer_layout = QtWidgets.QVBoxLayout(self.drawer); self.drawer_layout.setContentsMargins(12,12,12,12)
+        self.drawer_layout = QtWidgets.QVBoxLayout(self.drawer)
+        self.drawer_layout.setContentsMargins(22, 20, 22, 20)
+        self.drawer_layout.setSpacing(12)
         self.drawer_title = QtWidgets.QLabel()
-        self.btn_close_drawer = QBtn("关闭详情"); self.btn_close_drawer.clicked.connect(self._close_drawer)
-        self.drawer_info  = QtWidgets.QTextEdit(); self.drawer_info.setReadOnly(True)
-        self.btn_mark_ok  = QBtn(); self.btn_mark_ng  = QBtn(); self.btn_snapshot = QBtn("保存截图")
+        self.drawer_title.setProperty("textRole", "sectionTitle")
+        self.btn_close_drawer = QBtn("关闭详情")
+        self.btn_close_drawer.setProperty("variant", "ghost")
+        self.btn_close_drawer.clicked.connect(self._close_drawer)
+        self.drawer_info = QtWidgets.QTextEdit()
+        self.drawer_info.setReadOnly(True)
+        self.btn_mark_ok = QBtn()
+        self.btn_mark_ok.setProperty("variant", "primary")
+        self.btn_mark_ng = QBtn()
+        self.btn_mark_ng.setProperty("variant", "danger")
+        self.btn_snapshot = QBtn("保存截图")
+        self.btn_snapshot.setProperty("variant", "secondary")
         self.btn_mark_ok.clicked.connect(lambda: self._mark_current_alert("valid"))
         self.btn_mark_ng.clicked.connect(lambda: self._mark_current_alert("false_alarm"))
         self.btn_snapshot.clicked.connect(self._save_current_alert_snapshot)
         self.current_alert = None
         self.last_qimage = None
         drawer_header = QtWidgets.QHBoxLayout()
-        drawer_header.addWidget(self.drawer_title); drawer_header.addStretch(1); drawer_header.addWidget(self.btn_close_drawer)
-        self.drawer_layout.addLayout(drawer_header); self.drawer_layout.addWidget(self.drawer_info)
-        row_b = QtWidgets.QHBoxLayout(); row_b.addWidget(self.btn_mark_ok); row_b.addWidget(self.btn_mark_ng); row_b.addWidget(self.btn_snapshot)
+        drawer_header.addWidget(self.drawer_title)
+        drawer_header.addStretch(1)
+        drawer_header.addWidget(self.btn_close_drawer)
+        self.drawer_layout.addLayout(drawer_header)
+        self.drawer_layout.addWidget(self.drawer_info)
+        row_b = QtWidgets.QHBoxLayout()
+        row_b.setSpacing(8)
+        row_b.addWidget(self.btn_mark_ok)
+        row_b.addWidget(self.btn_mark_ng)
+        row_b.addWidget(self.btn_snapshot)
         self.drawer_layout.addLayout(row_b)
 
         # 源：先填充但屏蔽信号；worker 创建后再绑定切换信号，避免提前触发
@@ -1050,6 +1250,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.apply_theme()
         self.apply_i18n()
         self.apply_role(self.role.currentText())
+        self._apply_responsive_layout()
 
     # ---------- 设置与动态模型 ----------
     def _load_settings(self):
@@ -1137,6 +1338,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._clear_layout(self.model_list_layout)
         self.model_checks = {}
         self.model_status_labels = {}
+        is_zh = self.lang_code == "zh"
         for spec in self.catalog_snapshot.models:
             row = QtWidgets.QFrame()
             row.setObjectName("ModelRow")
@@ -1154,9 +1356,12 @@ class MainWindow(QtWidgets.QMainWindow):
             details.setToolTip(str(spec.weight_path))
             if spec.issue:
                 checkbox.setToolTip(spec.issue + "\n" + str(spec.weight_path))
-            status = QtWidgets.QLabel(
-                "可用" if spec.status == "ready" else "新发现" if spec.status == "new" else "不可用"
+            status_names = (
+                {"ready": "可用", "new": "新发现"}
+                if is_zh else
+                {"ready": "READY", "new": "NEW"}
             )
+            status = QtWidgets.QLabel(status_names.get(spec.status, "不可用" if is_zh else "UNAVAILABLE"))
             status.setObjectName("ModelStatus")
             status.setProperty(
                 "badge", "success" if spec.status == "ready" else "warning" if spec.status == "new" else "danger"
@@ -1240,16 +1445,21 @@ class MainWindow(QtWidgets.QMainWindow):
         class_count = len(self.catalog_snapshot.selected_class_ids(self.selected_model_ids))
         active_count = len(active_ids) if active_ids is not None else getattr(self, "active_model_count", 0)
         device_name = "CUDA" if torch.cuda.is_available() else "CPU"
-        self.lbl_model_summary.setText(
-            "已选 %d 个 · 已加载 %d 个 · %d 个目标 · %s"
-            % (selected_count, active_count, class_count, device_name)
-        )
+        if self.lang_code == "zh":
+            summary = "已选 %d 个 · 已加载 %d 个 · %d 个目标 · %s"
+        else:
+            summary = "%d selected · %d loaded · %d targets · %s"
+        self.lbl_model_summary.setText(summary % (selected_count, active_count, class_count, device_name))
 
     def _on_model_status(self, model_id, state, message):
         label = self.model_status_labels.get(model_id)
         if label is None:
             return
-        names = {"loading": "加载中", "active": "已启用", "inactive": "可用", "failed": "加载失败"}
+        names = (
+            {"loading": "加载中", "active": "已启用", "inactive": "可用", "failed": "加载失败"}
+            if self.lang_code == "zh" else
+            {"loading": "LOADING", "active": "ACTIVE", "inactive": "READY", "failed": "FAILED"}
+        )
         label.setText(names.get(state, state))
         label.setToolTip(message)
         tone = {"failed": "danger", "active": "success", "inactive": "neutral", "loading": "warning"}.get(
@@ -1301,18 +1511,65 @@ class MainWindow(QtWidgets.QMainWindow):
 
     # ---------- 样式 ----------
     def _build_stylesheet(self):
-        t = P()
+        t = app_tokens(DARK)
         return build_app_stylesheet(dark=DARK) + f"""
-        QFrame#CardFrame {{ background:{t['card']}; border:1px solid {t['line']}; border-radius:14px; }}
-        QFrame#ModelRow {{ background:{t['bg2']}; border:1px solid {t['line']}; border-radius:9px; }}
-        QFrame#Separator {{ background:{t['line']}; min-height:1px; max-height:1px; border:0; }}
-        QWidget#VideoCanvas {{ background:#02060D; border:1px solid {t['line']}; border-radius:10px; }}
-        QLabel#MutedLabel {{ color:{t['text2']}; font-size:12px; }}
-        QListView::item {{ border-bottom:1px solid {t['line']}; padding:7px 9px; }}
+        QFrame#CardFrame {{
+            background:{t['glass']};
+            border:1px solid {t['hairline']};
+            border-radius:16px;
+        }}
+        QFrame#ViewportFrame {{
+            background:qlineargradient(x1:0, y1:0, x2:1, y2:1,
+                stop:0 {t['glass_strong']}, stop:1 {t['glass']});
+            border:1px solid {t['hairline_strong']};
+            border-radius:22px;
+        }}
+        QFrame#InspectorFrame {{
+            background:{t['sidebar_glass']};
+            border:1px solid {t['hairline_strong']};
+            border-radius:22px;
+        }}
+        QFrame#TransportBar, QFrame#RegionBar {{
+            background:{t['glass_alt']};
+            border:1px solid {t['hairline']};
+            border-radius:14px;
+        }}
+        QFrame#AlertDrawer {{
+            background:{t['sidebar_glass']};
+            border:0;
+            border-left:1px solid {t['hairline_strong']};
+        }}
+        QFrame#ModelRow {{
+            background:{t['glass_alt']};
+            border:1px solid {t['hairline']};
+            border-radius:10px;
+        }}
+        QFrame#Separator {{
+            background:{t['hairline']};
+            min-height:1px;
+            max-height:1px;
+            border:0;
+        }}
+        QWidget#VideoCanvas {{
+            background:#02090E;
+            border:1px solid {t['hairline_strong']};
+            border-radius:16px;
+        }}
+        QTabWidget#InspectorTabs::pane {{ background:transparent; border:0; top:-1px; }}
+        QTabWidget#InspectorTabs > QWidget {{ background:transparent; }}
+        QLabel#SourceState {{ color:{t['muted']}; padding-left:4px; }}
+        QLabel#MutedLabel {{ color:{t['muted']}; font-size:12px; }}
+        QListView::item {{ border-bottom:1px solid {t['hairline']}; padding:9px 10px; }}
         QListView::item:selected {{ border-left:3px solid {t['primary']}; }}
+        QToolButton {{ text-align:left; }}
         """
-    def _card(self):
-        w = QtWidgets.QFrame(); w.setObjectName("CardFrame"); return w
+    def _card(self, object_name="CardFrame", material="panel"):
+        card = QtWidgets.QFrame()
+        card.setObjectName(object_name)
+        card.setProperty("glass", material)
+        card.setAttribute(QtCore.Qt.WidgetAttribute.WA_StyledBackground, True)
+        return card
+
     def _hline(self):
         line = QtWidgets.QFrame()
         line.setObjectName("Separator")
@@ -1320,6 +1577,25 @@ class MainWindow(QtWidgets.QMainWindow):
         return line
     def _spacer(self):
         s = QtWidgets.QWidget(); s.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Expanding); return s
+
+    def _set_demo_sources_visible(self, visible):
+        self.demo_sources_panel.setVisible(bool(visible))
+        self.demo_toggle.setArrowType(
+            QtCore.Qt.ArrowType.DownArrow if visible else QtCore.Qt.ArrowType.RightArrow
+        )
+
+    def _apply_responsive_layout(self):
+        compact = self.width() < 1320
+        short = self.height() < 800
+        self.sub.setVisible(not compact)
+        self.regions_hint.setVisible(self.width() >= 1380)
+        self.source_state.setMaximumWidth(190 if compact else 320)
+        self.inspector_panel.setMinimumWidth(350 if compact else 380)
+        self.inspector_panel.setMaximumWidth(430 if compact else 500)
+        self.model_scroll.setMinimumHeight(104 if short else 138)
+        self.model_scroll.setMaximumHeight(122 if short else 200)
+        self.class_scroll.setMinimumHeight(54 if short else 88)
+        self.class_scroll.setMaximumHeight(72 if short else 145)
 
     # ---------- 文字和图标 ----------
     def L(self, key, **fmt):
@@ -1334,34 +1610,80 @@ class MainWindow(QtWidgets.QMainWindow):
         self.title.setText(APP_NAME)
         self.sub.setText(SUBTITLE)
         is_zh = self.lang_code == "zh"
-        self.btn_theme.setText("主题" if is_zh else "Theme")
-        self.btn_rm.setText("动效" if is_zh else "Motion")
+        self.system_badge.setText("本地 · 离线" if is_zh else "LOCAL · OFFLINE")
+        self.btn_theme.setText(("浅色" if DARK else "深色") if is_zh else ("Light" if DARK else "Dark"))
+        self.btn_rm.setText(
+            ("动效：减弱" if REDUCE_MOTION else "动效：标准")
+            if is_zh else
+            ("Motion: Reduced" if REDUCE_MOTION else "Motion: Full")
+        )
         self.btn_play.setText("播放" if is_zh else "Play")
         self.btn_pause.setText("暂停" if is_zh else "Pause")
         self.btn_stop.setText("停止" if is_zh else "Stop")
-        self.btn_add_roi.setText(self.L('add_roi'))
-        self.btn_add_mask.setText(self.L('add_mask'))
-        self.btn_edit_poly.setText(self.L('edit'))
-        self.btn_clear_poly.setText(self.L('reselect'))
-        self.btn_file.setText(self.L('pick_file'))
+        self.btn_add_roi.setText("添加 ROI" if is_zh else "Add ROI")
+        self.btn_add_mask.setText("添加屏蔽区" if is_zh else "Add Mask")
+        self.btn_edit_poly.setText("编辑顶点" if is_zh else "Edit Points")
+        self.btn_clear_poly.setText("清除区域" if is_zh else "Clear Regions")
+        self.btn_file.setText("选择本地视频" if is_zh else "Choose Local Video")
         self.txt_url.setPlaceholderText(self.L('url_ph'))
-        self.btn_load.setText(self.L('load'))
-        self.btn_webcam.setText(self.L('webcam'))
-        self.btn_demo1.setText(self.L('demo1'))
-        self.btn_demo2.setText(self.L('demo2'))
-        self.monitor_title.setText("实时监控" if is_zh else "Live monitoring")
-        self.source_title.setText("视频源" if is_zh else "Video source")
+        self.btn_load.setText("连接" if is_zh else "Connect")
+        self.btn_webcam.setText("打开摄像头" if is_zh else "Open Webcam")
+        self.btn_demo1.setText("火情示例" if is_zh else "Fire Sample")
+        self.btn_demo2.setText("防护示例" if is_zh else "PPE Sample")
+        self.demo_toggle.setText("示例源 · 需要网络" if is_zh else "Sample feeds · network required")
+        self.monitor_eyebrow.setText("LIVE DETECTION")
+        self.monitor_title.setText("检测画布" if is_zh else "Detection Canvas")
+        self.transport_label.setText("当前来源" if is_zh else "Current source")
+        self.regions_label.setText("分析区域" if is_zh else "Analysis regions")
+        self.regions_hint.setText(
+            "ROI 参与检测；屏蔽区会被忽略" if is_zh else "ROIs are analysed; masks are ignored"
+        )
+        self.inspector_eyebrow.setText("INSPECTOR")
+        self.inspector_title.setText("操作与审查" if is_zh else "Controls & Review")
+        self.source_title.setText("添加来源" if is_zh else "Add a source")
+        self.source_helper.setText(
+            "选择本地视频、设备或网络流；输入不会上传。"
+            if is_zh else
+            "Choose a local file, device, or network stream. Inputs stay on this machine."
+        )
+        self.source_url_label.setText("网络地址" if is_zh else "Network address")
+        self.source_quick_label.setText("设备" if is_zh else "Device")
+        for index in range(self.src_quick.count()):
+            if self.src_quick.itemData(index) == "none":
+                self.src_quick.setItemText(
+                    index,
+                    "-- 请选择视频源 --" if is_zh else "-- Choose a video source --",
+                )
+                break
         if not self.active_source_id:
             self.source_state.setText("等待选择视频源" if is_zh else "Waiting for a video source")
         self.lbl_model.setText("检测模型" if is_zh else "Detection models")
-        self.lbl_classes.setText("识别目标" if self.lang_code == "zh" else "Detection targets")
-        self.btn_rescan_models.setText("重新扫描 RESULTS" if self.lang_code == "zh" else "Rescan RESULTS")
-        self.lbl_conf.setText(self.L('conf'))
-        self.lbl_iou.setText(self.L('iou'))
-        self.timeline_title.setText(self.L('timeline'))
-        self.btn_clear_alerts.setText(self.L('clear_alerts'))
-        self.btn_export_csv.setText(self.L('export_csv'))
-        self.btn_export_json.setText(self.L('export_json'))
+        self.threshold_title.setText("检测灵敏度" if is_zh else "Detection sensitivity")
+        self.lbl_classes.setText("识别目标" if is_zh else "Detection targets")
+        self.btn_rescan_models.setText("扫描 RESULTS" if is_zh else "Scan RESULTS")
+        self.lbl_conf.setText("置信阈值" if is_zh else "Confidence")
+        self.lbl_iou.setText("重叠阈值" if is_zh else "NMS IoU")
+        self.timeline_title.setText("事件审查" if is_zh else "Event review")
+        self.timeline_hint.setText(
+            "选择事件可打开详情并记录人工结论。"
+            if is_zh else
+            "Select an event to inspect it and record a human conclusion."
+        )
+        self.btn_clear_alerts.setText("清空" if is_zh else "Clear")
+        self.btn_export_csv.setText("导出 CSV" if is_zh else "Export CSV")
+        self.btn_export_json.setText("导出 JSON" if is_zh else "Export JSON")
+        self.inspector_tabs.setTabText(0, "来源" if is_zh else "Source")
+        self.inspector_tabs.setTabText(1, "检测" if is_zh else "Detection")
+        self.inspector_tabs.setTabText(2, "事件" if is_zh else "Events")
+        status_names = (
+            {"ready": "可用", "new": "新发现"}
+            if is_zh else
+            {"ready": "READY", "new": "NEW"}
+        )
+        for spec in self.catalog_snapshot.models:
+            label = self.model_status_labels.get(spec.model_id)
+            if label is not None:
+                label.setText(status_names.get(spec.status, "不可用" if is_zh else "UNAVAILABLE"))
         self.drawer_title.setText(self.L('alert_detail'))
         self.btn_mark_ok.setText("标注为有效" if is_zh else "Mark Valid")
         self.btn_mark_ng.setText("标注为误报" if is_zh else "Mark False")
@@ -1443,16 +1765,26 @@ class MainWindow(QtWidgets.QMainWindow):
             pass
         return super().closeEvent(e)
 
+    def keyPressEvent(self, event):
+        if event.key() == QtCore.Qt.Key.Key_Escape and self.drawer_open:
+            self._close_drawer()
+            event.accept()
+            return
+        super().keyPressEvent(event)
+
     def resizeEvent(self, event):
         super().resizeEvent(event)
+        if hasattr(self, "inspector_panel"):
+            self._apply_responsive_layout()
         if not hasattr(self, "drawer"):
             return
         self.drawer_anim.stop()
+        drawer_width = self._drawer_width()
+        self.drawer.resize(drawer_width, self.height())
         if self.drawer_open:
-            drawer_width = min(560, max(360, self.width() - 40))
-            self.drawer.setGeometry(self.width() - drawer_width, 0, drawer_width, self.height())
+            self.drawer.move(self.width() - drawer_width, 0)
         else:
-            self.drawer.setGeometry(self.width(), 0, 0, self.height())
+            self.drawer.move(self.width(), 0)
 
     # ---------- 源 ----------
     def _on_quick_switch(self, idx):
@@ -1526,6 +1858,8 @@ class MainWindow(QtWidgets.QMainWindow):
                 snapshot_bytes = bytes(data)
         a_dict["_snapshot_bytes"] = snapshot_bytes
         self.alerts_model.add_alert(Alert(**a_dict))
+        self.alert_count_badge.setText(str(len(self.alerts_model.items)))
+        set_property(self.alert_count_badge, "badge", "warning")
     def _open_alert_detail(self, index: QtCore.QModelIndex):
         a: Alert = self.alerts_model.data(index, QtCore.Qt.ItemDataRole.UserRole)
         if not a:
@@ -1556,6 +1890,8 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def _clear_alerts(self):
         self.alerts_model.clear()
+        self.alert_count_badge.setText("0")
+        set_property(self.alert_count_badge, "badge", "neutral")
         self.current_alert = None
         self._close_drawer()
         self.statusBar().showMessage("告警记录已清空" if self.lang_code == "zh" else "Alerts cleared")
@@ -1576,29 +1912,34 @@ class MainWindow(QtWidgets.QMainWindow):
         self.statusBar().showMessage("告警截图已保存：%s" % path)
 
     # ---------- 抽屉 ----------
+    def _drawer_width(self):
+        return min(520, max(380, self.width() - 48))
+
     def _open_drawer(self):
-        drawer_width = min(560, max(360, self.width() - 40))
-        self.drawer.setStyleSheet(f"background:{P()['bg2']}; border-left:1px solid {P()['line']}; color:{P()['text']};")
-        start = self.drawer.geometry()
-        end = QtCore.QRect(self.width() - drawer_width, 0, drawer_width, self.height())
+        drawer_width = self._drawer_width()
+        self.drawer.resize(drawer_width, self.height())
+        start = self.drawer.pos()
+        end = QtCore.QPoint(self.width() - drawer_width, 0)
         self.drawer_open = True
         self.drawer.raise_()
         self.drawer_anim.stop()
         if REDUCE_MOTION:
-            self.drawer.setGeometry(end)
+            self.drawer.move(end)
         else:
+            self.drawer_anim.setDuration(220)
             self.drawer_anim.setStartValue(start)
             self.drawer_anim.setEndValue(end)
             self.drawer_anim.start()
 
     def _close_drawer(self):
-        start = self.drawer.geometry()
-        end = QtCore.QRect(self.width(), 0, 0, self.height())
+        start = self.drawer.pos()
+        end = QtCore.QPoint(self.width(), 0)
         self.drawer_open = False
         self.drawer_anim.stop()
         if REDUCE_MOTION:
-            self.drawer.setGeometry(end)
+            self.drawer.move(end)
         else:
+            self.drawer_anim.setDuration(160)
             self.drawer_anim.setStartValue(start)
             self.drawer_anim.setEndValue(end)
             self.drawer_anim.start()
@@ -1634,13 +1975,29 @@ class MainWindow(QtWidgets.QMainWindow):
     def toggle_theme(self):
         global DARK; DARK = not DARK
         self.apply_theme()
+        is_zh = self.lang_code == "zh"
+        self.btn_theme.setText(("浅色" if DARK else "深色") if is_zh else ("Light" if DARK else "Dark"))
     def toggle_reduce_motion(self):
         global REDUCE_MOTION; REDUCE_MOTION = not REDUCE_MOTION
-        self.canvas.reduce_motion = REDUCE_MOTION
-        self.statusBar().showMessage(f"Motion {'Off' if REDUCE_MOTION else 'On'}")
+        os.environ["SENTINEL_REDUCE_MOTION"] = "1" if REDUCE_MOTION else "0"
+        if REDUCE_MOTION and self.drawer_anim.state() == QtCore.QAbstractAnimation.State.Running:
+            self.drawer_anim.stop()
+            target_x = self.width() - self.drawer.width() if self.drawer_open else self.width()
+            self.drawer.move(target_x, 0)
+        is_zh = self.lang_code == "zh"
+        self.btn_rm.setText(
+            ("动效：减弱" if REDUCE_MOTION else "动效：标准")
+            if is_zh else
+            ("Motion: Reduced" if REDUCE_MOTION else "Motion: Full")
+        )
+        self.statusBar().showMessage(
+            ("已启用减弱动态" if REDUCE_MOTION else "已恢复标准动效")
+            if is_zh else
+            ("Reduced motion enabled" if REDUCE_MOTION else "Standard motion restored")
+        )
     def apply_theme(self):
         self.setStyleSheet(self._build_stylesheet())
-        self.drawer.setStyleSheet(f"background:{P()['bg2']}; border-left:1px solid {P()['line']}; color:{P()['text']};")
+        self.drawer.setStyleSheet("")
         for combo in (self.lang, self.role, self.src_quick): combo.apply_theme()
         self.canvas.update()
 
