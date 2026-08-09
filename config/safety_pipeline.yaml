@@ -34,7 +34,10 @@ ppe:
       new_candidate_min_confidence: 0.45
       max_tentative_candidates: 128
     publication:
-      min_duration_seconds: 0.20
+      # Private candidates do not consume a visible Track ID or render a box.
+      # A missing/low-confidence inference resets this publication streak.
+      min_consecutive_hits: 4
+      min_duration_seconds: 0.60
       min_ema_confidence: 0.50
       ema_alpha: 0.35
     reacquisition:

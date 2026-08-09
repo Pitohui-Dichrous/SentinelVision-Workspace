@@ -73,7 +73,8 @@ config/safety_pipeline.yaml
 | `admission.association_min_confidence` | 0.20 | 可用于续接已公开 Track 的最低置信度 |
 | `admission.new_candidate_min_confidence` | 0.45 | 新建候选和形成证据的最低置信度 |
 | `admission.max_tentative_candidates` | 128 | 未确认候选容量；满载时只拒绝新候选，不驱逐已确认 Track |
-| `publication.min_duration_seconds` | 0.20 s | 分配公开 Track ID 前的最短观测时间 |
+| `publication.min_consecutive_hits` | 4 | 分配公开 Track ID 前的连续高置信命中数 |
+| `publication.min_duration_seconds` | 0.60 s | 分配公开 Track ID 前的连续观测时间 |
 | `publication.min_ema_confidence` | 0.50 | 分配公开 Track ID 前的最低置信 EMA |
 | `publication.ema_alpha` | 0.35 | 候选置信 EMA 的当前样本权重 |
 | `reacquisition.enabled` | true | 是否对严格匹配失败的已确认 Track 尝试短时重关联 |
@@ -92,7 +93,7 @@ config/safety_pipeline.yaml
 
 schema 3 在匹配前先预测全部活动 Track 的中心，严格和宽松阶段都使用预测状态。尺寸只做 EMA、不外推速度；中心速度具有最小 `dt`、尺度相关上限和时间衰减。经历检测间隙的匹配还必须通过双向唯一性差值；多人关系含糊时拒绝继承并创建私有候选。Resolver 使用不同目标：先最大化可消解冲突对数量，再比较总权重。
 
-内部 `candidate_id` 不会进入普通 UI、告警或导出。候选达到 `min_hits`、发布最短时间和置信 EMA 后才获得会话内连续、单调且不复用的公开 `track_id`；一帧误检不会显示或消耗编号。schema 3 强制 `max_tentative_candidates >= 1`，显式配置为 0 会校验失败；只有 schema 1/2 的内部兼容默认允许无限值。低置信检测只更新已公开 Track 的几何关联，不增加 Temporal/Risk 证据。公开编号必须与 `session_id` 组合使用。
+内部 `candidate_id` 不会进入普通 UI、告警或导出。候选达到独立的连续高置信命中数、发布连续时间和该连续段自己的置信 EMA 后才获得会话内连续、单调且不复用的公开 `track_id`。未发布候选在缺失或低置信观测时会同时重置发布命中、起始时间和发布 EMA；其私有身份仍可在候选生命周期内被重捕获，但缺失前的时间与高分不能帮助新连续段晋升。未通过门禁的短暂高置信噪声不会产生普通 `PipelineDetection`，因此不显示识别框也不消耗编号。schema 3 强制 `max_tentative_candidates >= 1`，显式配置为 0 会校验失败；只有 schema 1/2 的内部兼容默认允许无限值。低置信检测只更新已公开 Track 的几何关联，不增加 Temporal/Risk 证据。公开编号必须与 `session_id` 组合使用。
 
 生产模式采用真正的双阈值：YOLO 推理保留到 `association_min_confidence`，避免低分框在进入 tracker 前就被丢弃；Inspector 的 confidence 与 `new_candidate_min_confidence` 取较高者，作为新建候选和有效证据的门槛。因此提高 UI 阈值会更严格，但不会切断已公开 Track 在关联下限以上的短时低置信续接。兼容基线仍把 UI confidence 直接传给旧推理路径，行为不变。修改 confidence 或 NMS IoU 会清空生产模式下的旧轨迹与证据，避免一个 episode 混用两套判定策略。
 

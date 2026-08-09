@@ -46,6 +46,7 @@ def hardened_config(**overrides):
         max_tentative_candidates=8,
         association_min_confidence=0.20,
         new_candidate_min_confidence=0.45,
+        publication_min_hits=0,
         publication_min_seconds=0.0,
         publication_min_confidence=0.0,
         confidence_alpha=0.35,
@@ -255,6 +256,7 @@ class ConfidenceAdmissionTests(unittest.TestCase):
     def test_publication_requires_hits_duration_and_confidence(self):
         tracker = HeadTracker(hardened_config(
             min_hits=2,
+            publication_min_hits=2,
             publication_min_seconds=0.20,
             publication_min_confidence=0.80,
         ))
@@ -267,6 +269,117 @@ class ConfidenceAdmissionTests(unittest.TestCase):
         self.assertTrue(second.confirmed)
         self.assertEqual(third.track_id, 1)
         self.assertEqual(tracker.stats["promoted"], 1)
+
+    def test_missing_frames_reset_private_publication_streak(self):
+        tracker = HeadTracker(hardened_config(
+            min_hits=2,
+            publication_min_hits=4,
+            publication_min_seconds=0.60,
+            publication_min_confidence=0.80,
+            tentative_max_lost_seconds=0.40,
+        ))
+
+        candidate_ids = []
+        for timestamp in (0.0, 0.20, 0.40, 0.60):
+            visible = tracker.update(
+                (head((0, 0, 40, 40), confidence=0.95),),
+                timestamp,
+            ).visible[0]
+            candidate_ids.append(visible.candidate_id)
+            self.assertIsNone(visible.track_id)
+            tracker.update((), timestamp + 0.10)
+
+        self.assertEqual(len(set(candidate_ids)), 1)
+        self.assertEqual(tracker.active_count, 0)
+        self.assertEqual(tracker.stats["promoted"], 0)
+
+    def test_only_continuous_high_confidence_streak_consumes_public_id(self):
+        tracker = HeadTracker(hardened_config(
+            min_hits=2,
+            publication_min_hits=4,
+            publication_min_seconds=0.60,
+            publication_min_confidence=0.80,
+            tentative_max_lost_seconds=0.30,
+        ))
+
+        noise = tracker.update(
+            (head((0, 0, 40, 40), confidence=0.99),),
+            0.0,
+        ).visible[0]
+        self.assertIsNone(noise.track_id)
+        tracker.update((), 0.31)
+
+        published = None
+        for timestamp in (1.0, 1.20, 1.40, 1.60):
+            published = tracker.update(
+                (head((100, 0, 140, 40), confidence=0.95),),
+                timestamp,
+            ).visible[0]
+
+        self.assertIsNotNone(published)
+        self.assertEqual(published.track_id, 1)
+        self.assertEqual(tracker.stats["promoted"], 1)
+
+    def test_low_confidence_frame_cannot_bridge_private_publication_streak(self):
+        tracker = HeadTracker(hardened_config(
+            min_hits=2,
+            association_min_confidence=0.20,
+            new_candidate_min_confidence=0.60,
+            publication_min_hits=4,
+            publication_min_seconds=0.60,
+            publication_min_confidence=0.80,
+            tentative_max_lost_seconds=0.50,
+        ))
+
+        first = tracker.update(
+            (head((0, 0, 40, 40), confidence=0.95),), 0.0
+        ).visible[0]
+        second = tracker.update(
+            (head((2, 0, 42, 40), confidence=0.95),), 0.20
+        ).visible[0]
+        low = tracker.update(
+            (head((4, 0, 44, 40), confidence=0.30),), 0.40
+        )
+        self.assertEqual(first.candidate_id, second.candidate_id)
+        self.assertIsNone(second.track_id)
+        self.assertEqual(low.visible, ())
+
+        for timestamp in (0.60, 0.80, 1.00):
+            waiting = tracker.update(
+                (head((6, 0, 46, 40), confidence=0.95),), timestamp
+            ).visible[0]
+            self.assertIsNone(waiting.track_id)
+        published = tracker.update(
+            (head((8, 0, 48, 40), confidence=0.95),), 1.20
+        ).visible[0]
+
+        self.assertEqual(published.candidate_id, first.candidate_id)
+        self.assertEqual(published.track_id, 1)
+
+    def test_missing_frame_resets_private_publication_confidence_ema(self):
+        tracker = HeadTracker(hardened_config(
+            min_hits=2,
+            publication_min_hits=2,
+            publication_min_seconds=0.20,
+            publication_min_confidence=0.87,
+            tentative_max_lost_seconds=0.50,
+        ))
+
+        initial = tracker.update(
+            (head((0, 0, 40, 40), confidence=0.99),), 0.0
+        ).visible[0]
+        tracker.update((), 0.10)
+        restarted = tracker.update(
+            (head((2, 0, 42, 40), confidence=0.80),), 0.20
+        ).visible[0]
+        boundary = tracker.update(
+            (head((4, 0, 44, 40), confidence=0.80),), 0.40
+        ).visible[0]
+
+        self.assertEqual(restarted.candidate_id, initial.candidate_id)
+        self.assertIsNone(restarted.track_id)
+        self.assertIsNone(boundary.track_id)
+        self.assertEqual(tracker.stats["promoted"], 0)
 
     def test_runtime_high_threshold_controls_candidate_creation(self):
         tracker = HeadTracker(hardened_config(

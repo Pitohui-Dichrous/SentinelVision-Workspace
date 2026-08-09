@@ -129,6 +129,7 @@ class TrackingConfig:
     max_tentative_candidates: int = 0
     association_min_confidence: float = 0.0
     new_candidate_min_confidence: float = 0.0
+    publication_min_hits: int = 0
     publication_min_seconds: float = 0.0
     publication_min_confidence: float = 0.0
     confidence_alpha: float = 0.35
@@ -235,8 +236,11 @@ class TrackingConfig:
             ),
             association_min_confidence=association_min_confidence,
             new_candidate_min_confidence=new_candidate_min_confidence,
+            publication_min_hits=_integer(
+                publication, "min_consecutive_hits", 4, 1
+            ),
             publication_min_seconds=_number(
-                publication, "min_duration_seconds", 0.20, 0.0, 30.0
+                publication, "min_duration_seconds", 0.60, 0.0, 30.0
             ),
             publication_min_confidence=_number(
                 publication, "min_ema_confidence", 0.50, 0.0, 1.0
@@ -463,6 +467,7 @@ def config_fingerprint(config: SafetyPipelineConfig) -> str:
             "max_tentative_candidates",
             "association_min_confidence",
             "new_candidate_min_confidence",
+            "publication_min_hits",
             "publication_min_seconds",
             "publication_min_confidence",
             "confidence_alpha",

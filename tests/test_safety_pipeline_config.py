@@ -141,7 +141,8 @@ class SafetyPipelineConfigTests(unittest.TestCase):
                         "max_tentative_candidates": 64,
                     },
                     "publication": {
-                        "min_duration_seconds": 0.2,
+                        "min_consecutive_hits": 5,
+                        "min_duration_seconds": 0.6,
                         "min_ema_confidence": 0.5,
                     },
                     "reacquisition": {"motion_model": "alpha_beta"},
@@ -161,6 +162,8 @@ class SafetyPipelineConfigTests(unittest.TestCase):
         self.assertEqual(config.tracking.motion_model, "alpha_beta")
         self.assertEqual(config.tracking.max_tentative_candidates, 64)
         self.assertEqual(config.tracking.new_candidate_min_confidence, 0.45)
+        self.assertEqual(config.tracking.publication_min_hits, 5)
+        self.assertEqual(config.tracking.publication_min_seconds, 0.6)
         self.assertEqual(config.risk.min_violation_seconds, 0.8)
         self.assertTrue(config.alert_validation.enabled)
 
@@ -195,6 +198,8 @@ class SafetyPipelineConfigTests(unittest.TestCase):
             }}}},
             {"ppe": {"tracking": {"reacquisition": {"motion_model": "magic"}}}},
             {"ppe": {"tracking": {"reacquisition": {"motion_model": "legacy"}}}},
+            {"ppe": {"tracking": {"publication": {"min_consecutive_hits": 0}}}},
+            {"ppe": {"tracking": {"publication": {"min_duration_seconds": float("nan")}}}},
             {"ppe": {"risk": {"verification": {"min_stability": float("nan")}}}},
             {"alert_validation": {"defaults": {
                 "min_duration_seconds": 2.0,

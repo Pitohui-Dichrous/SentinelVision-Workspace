@@ -35,10 +35,16 @@ class ProductionPipelineTests(unittest.TestCase):
         resolution = pipeline.resolve((RawDetection(confidence, class_id=class_id),))
         return pipeline.process(resolution.detections, resolution, timestamp)
 
+    def process_empty(self, pipeline, timestamp):
+        resolution = pipeline.resolve(())
+        return pipeline.process(resolution.detections, resolution, timestamp)
+
     def test_tracked_schema_three_configuration_is_valid(self):
         self.assertTrue(self.valid)
         self.assertEqual(self.config.schema_version, 3)
         self.assertEqual(self.config.tracking.motion_model, "alpha_beta")
+        self.assertEqual(self.config.tracking.publication_min_hits, 4)
+        self.assertEqual(self.config.tracking.publication_min_seconds, 0.60)
         self.assertTrue(self.config.alert_validation.enabled)
 
     def test_short_high_confidence_burst_does_not_alarm(self):
@@ -47,8 +53,31 @@ class ProductionPipelineTests(unittest.TestCase):
         for frame_index in range(8):
             result = self.process(pipeline, 0.95, frame_index / 25.0)
             alerts.extend(result.alerts)
+            self.assertEqual(result.detections, ())
         self.assertEqual(alerts, [])
         self.assertEqual(result.metrics.alerts_emitted, 0)
+        self.assertEqual(result.metrics.active_tracks, 0)
+        self.assertEqual(result.metrics.candidates_promoted, 0)
+
+    def test_private_noise_never_consumes_first_public_track_id(self):
+        pipeline = PPETemporalPipeline(self.config, session_id="public-id")
+        for timestamp in (0.0, 0.10, 0.20):
+            result = self.process(pipeline, 0.99, timestamp)
+            self.assertEqual(result.detections, ())
+
+        retired = self.process_empty(pipeline, 0.51)
+        self.assertEqual(retired.metrics.active_candidates, 0)
+        self.assertEqual(retired.metrics.candidates_promoted, 0)
+
+        first_public = None
+        for timestamp in (1.0, 1.20, 1.40, 1.60):
+            result = self.process(pipeline, 0.95, timestamp, "hat")
+            if result.detections:
+                first_public = result.detections[0]
+
+        self.assertIsNotNone(first_public)
+        self.assertEqual(first_public.track_id, 1)
+        self.assertEqual(result.metrics.candidates_promoted, 1)
 
     def test_sustained_violation_alarms_only_after_elapsed_time_gate(self):
         pipeline = PPETemporalPipeline(self.config, session_id="sustained")

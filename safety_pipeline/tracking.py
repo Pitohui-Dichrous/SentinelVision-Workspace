@@ -31,6 +31,9 @@ class _Track:
     lost_frames: int = 0
     motion_box: Optional[Box] = None
     confidence_ema: float = 0.0
+    publication_hits: int = 1
+    publication_started_at: Optional[float] = None
+    publication_confidence_ema: Optional[float] = None
 
 
 def _smooth(old_box: Box, new_box: Box, amount: float) -> Box:
@@ -655,7 +658,15 @@ class HeadTracker:
         evidence_eligible: Dict[int, bool] = {}
         for observation_index, candidate_id in sorted(assignments.items()):
             track = self._tracks[candidate_id]
+            publication_gap = candidate_id in previously_missing
             self._update_alpha_beta_track(track, items[observation_index], now)
+            self._update_publication_streak(
+                track,
+                now,
+                eligible=high_confidence[observation_index],
+                reset=publication_gap,
+                confidence=float(items[observation_index].confidence),
+            )
             observation_tracks[observation_index] = track
             evidence_eligible[observation_index] = high_confidence[observation_index]
 
@@ -693,6 +704,13 @@ class HeadTracker:
             track = self._new_alpha_beta_track(items[observation_index], now)
             observation_tracks[observation_index] = track
             evidence_eligible[observation_index] = True
+
+        matched_candidates = {
+            track.candidate_id for track in observation_tracks.values()
+        }
+        for candidate_id, track in self._tracks.items():
+            if candidate_id not in matched_candidates and track.track_id is None:
+                self._reset_publication_streak(track)
 
         self._assign_public_ids(now)
         visible = [
@@ -775,6 +793,9 @@ class HeadTracker:
             last_seen=timestamp,
             motion_box=observation.box,
             confidence_ema=float(observation.confidence),
+            publication_hits=1,
+            publication_started_at=timestamp,
+            publication_confidence_ema=float(observation.confidence),
         )
         self._tracks[candidate_id] = track
         return track
@@ -894,8 +915,61 @@ class HeadTracker:
             + (1.0 - confidence_alpha) * track.confidence_ema
         )
 
+    @staticmethod
+    def _reset_publication_streak(track: _Track) -> None:
+        if track.track_id is not None:
+            return
+        track.publication_hits = 0
+        track.publication_started_at = None
+        track.publication_confidence_ema = None
+
+    def _update_publication_streak(
+        self,
+        track: _Track,
+        timestamp: float,
+        *,
+        eligible: bool,
+        reset: bool,
+        confidence: float,
+    ) -> None:
+        """Advance only uninterrupted high-confidence publication evidence.
+
+        Association continuity and operator-visible publication are separate:
+        a private candidate may survive a short gap for motion reacquisition,
+        but that gap must never help it earn a public ID or visible box.
+        """
+
+        if track.track_id is not None:
+            return
+        if reset or not eligible:
+            self._reset_publication_streak(track)
+        if not eligible:
+            return
+        if track.publication_started_at is None:
+            track.publication_started_at = timestamp
+            track.publication_hits = 1
+            track.publication_confidence_ema = confidence
+        else:
+            track.publication_hits += 1
+            confidence_alpha = float(
+                getattr(self.config, "confidence_alpha", 0.35)
+            )
+            previous = (
+                confidence
+                if track.publication_confidence_ema is None
+                else track.publication_confidence_ema
+            )
+            track.publication_confidence_ema = (
+                confidence_alpha * confidence
+                + (1.0 - confidence_alpha) * previous
+            )
+
     def _assign_public_ids(self, timestamp: Optional[float] = None) -> None:
         hardened = getattr(self.config, "motion_model", "legacy") == "alpha_beta"
+        publication_min_hits = max(
+            int(self.config.min_hits),
+            int(getattr(self.config, "publication_min_hits", 0)),
+        )
         publication_min_seconds = float(
             getattr(self.config, "publication_min_seconds", 0.0)
         )
@@ -912,13 +986,23 @@ class HeadTracker:
             )
             and (
                 not hardened
-                or track.last_seen - track.first_seen + _EPSILON
-                >= publication_min_seconds
+                or track.publication_hits >= publication_min_hits
             )
             and (
                 not hardened
-                or track.confidence_ema + _EPSILON
-                >= publication_min_confidence
+                or (
+                    track.publication_started_at is not None
+                    and track.last_seen - track.publication_started_at + _EPSILON
+                    >= publication_min_seconds
+                )
+            )
+            and (
+                not hardened
+                or (
+                    track.publication_confidence_ema is not None
+                    and track.publication_confidence_ema + _EPSILON
+                    >= publication_min_confidence
+                )
             )
         ]
 

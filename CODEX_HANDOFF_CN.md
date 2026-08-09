@@ -26,7 +26,7 @@ Set-Location 'E:\SentinelVision_Workspace'
 - 工作库自带 Windows x64 Python 3.11.9、PyTorch 2.2.1+cu118、PySide6、完整训练依赖、离线修复包、便携 Git 和 GitHub CLI。
 - 已在 RTX 4080 Laptop 上通过 CUDA、自检、模型加载和多模型切换测试；目标公共电脑 RTX 4090 只需安装兼容 CUDA 11.8 的 NVIDIA 驱动，不需要另装 Python 或 CUDA Toolkit。
 - UI 已重做为现代深色工作台，包含“开始”“训练新模型”“审核与部署”“已部署模型”四页。原 SENTINEL 的已有视频、摄像头、告警、截图和检测功能均保留。
-- 检测台已加入可回退的“生产时序防护”：`hat/person` 冲突消解、高低置信双阈值、经过命中/持续时间/EMA 门禁的公开 Track ID、受限 Alpha-Beta 运动预测重捕获、N-of-M/EMA/滞回、每 Track 风险状态机、Event ID 与结构化证据日志。单帧候选、缺失框和预测框不构成告警证据；Fire 等非 PPE 告警类已接入通用按 Track 时序门禁，专用 FireTemporalVerifier 仍属后续阶段。
+- 检测台已加入可回退的“生产时序防护”：`hat/person` 冲突消解、高低置信双阈值、连续高置信命中/持续时间/EMA 公开 Track ID 门禁、受限 Alpha-Beta 运动预测重捕获、N-of-M/EMA/滞回、每 Track 风险状态机、Event ID 与结构化证据日志。未发布短噪声不显示识别框也不消耗公开编号；缺失框和预测框不构成告警证据。Fire 等非 PPE 告警类已接入通用按 Track 时序门禁，专用 FireTemporalVerifier 仍属后续阶段。
 - 训练和检测代码均使用相对路径；交接前使用 Git 跟踪文件搜索确认，没有 `D:\python`、`D:/python` 或其他 D 盘路径硬编码。
 
 ## 模型训练与数据集
@@ -114,7 +114,7 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File '.\portable\sync_github.
 - 10 个预训练权重均能作为 checkpoint 读取，P5/P6 配置映射正确；
 - 训练安全边界、人工审核门禁、部署归档和动态 `RESULTS` 扫描通过测试；
 - 快速关键文件检查与完整环境自检通过；
-- PPE/通用告警纯算法、双 ID、运动预测重捕获、证据门禁、集成契约与离屏 UI 共 125 项 unittest 全部通过；20 个稀疏/密集目标与 40 个密集目标的便携 Python 跟踪基准 p95 分别约 1.9 / 2.3 / 7.4 ms（仅为本机回归参考，不代表目标厂区 SLA）。
+- PPE/通用告警纯算法、双 ID、连续发布门、运动预测重捕获、证据门禁、集成契约与离屏 UI 共 130 项 unittest 全部通过；20 个稀疏/密集目标与 40 个密集目标的便携 Python 跟踪基准 p95 分别约 1.9 / 2.3 / 7.4 ms（仅为本机回归参考，不代表目标厂区 SLA）。
 - 用户已明确要求：从本阶段起，每次创建 Git 提交后同时推送 GitHub；若凭据或网络导致推送失败，必须明确报告，不得把本地提交误称为已同步。保护目录仍不得进入 Git。
 
 ## 新账号继续工作时的原则
