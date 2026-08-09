@@ -357,18 +357,29 @@ class VideoWorker(QtCore.QThread):
 
     def record_alert(self, alert):
         fields = (
-            "id", "event_id", "track_id", "ts", "source_id", "cls", "conf", "severity",
+            "id", "event_id", "session_id", "track_id", "track_id_namespace",
+            "ts", "source_id", "cls", "conf", "severity",
             "model_ids", "risk_type", "stable_state", "risk_state", "confirmation_delay",
             "pipeline_mode", "config_fingerprint",
         )
         payload = {key: alert.get(key) for key in fields if key in alert}
         self.event_journal.append("alert", payload)
 
-    def record_review(self, alert_id, conclusion, track_id=None, event_id=None):
+    def record_review(
+        self,
+        alert_id,
+        conclusion,
+        track_id=None,
+        event_id=None,
+        session_id=None,
+        track_id_namespace=None,
+    ):
         self.event_journal.append("human_review", {
             "alert_id": str(alert_id),
             "event_id": event_id,
+            "session_id": session_id,
             "track_id": track_id,
+            "track_id_namespace": track_id_namespace,
             "conclusion": str(conclusion),
         })
 
@@ -688,6 +699,7 @@ class VideoWorker(QtCore.QThread):
                                 "pipeline_mode": safety_mode,
                                 "config_fingerprint": safety_config_fingerprint,
                                 "track_id": transition.track_id,
+                                "track_id_namespace": "session_public",
                                 "risk_type": transition.risk_type,
                                 "from_state": transition.from_state.value,
                                 "to_state": transition.to_state.value,
@@ -742,7 +754,9 @@ class VideoWorker(QtCore.QThread):
                                 "severity": profile.severity,
                                 "snapshot": None,
                                 "model_ids": list(alert.source_model_ids),
+                                "session_id": pipeline_frame.metrics.session_id,
                                 "track_id": alert.track_id,
+                                "track_id_namespace": "session_public",
                                 "event_id": alert.event_id,
                                 "risk_type": alert.risk_type,
                                 "stable_state": alert.stable_state.value,
@@ -2264,6 +2278,12 @@ class MainWindow(QtWidgets.QMainWindow):
         }
         if getattr(a, "track_id", None) is not None:
             info[("轨迹 ID" if self.lang_code=="zh" else "Track ID")] = a.track_id
+            info[("轨迹会话" if self.lang_code=="zh" else "Track session")] = getattr(
+                a, "session_id", "—"
+            )
+            info[("编号作用域" if self.lang_code=="zh" else "ID namespace")] = getattr(
+                a, "track_id_namespace", "legacy"
+            )
             info[("事件 ID" if self.lang_code=="zh" else "Event ID")] = getattr(a, "event_id", a.id)
             info[("风险类型" if self.lang_code=="zh" else "Risk type")] = getattr(a, "risk_type", "—")
             info[("稳定状态" if self.lang_code=="zh" else "Stable state")] = getattr(a, "stable_state", "—")
@@ -2292,6 +2312,8 @@ class MainWindow(QtWidgets.QMainWindow):
                 conclusion,
                 getattr(self.current_alert, "track_id", None),
                 getattr(self.current_alert, "event_id", None),
+                getattr(self.current_alert, "session_id", None),
+                getattr(self.current_alert, "track_id_namespace", None),
             )
         self.statusBar().showMessage("告警人工结论已记录：%s" % conclusion)
         index = self.alerts_model.index(self.alerts_model.items.index(self.current_alert), 0)
@@ -2360,13 +2382,15 @@ class MainWindow(QtWidgets.QMainWindow):
         with open(path, "w", encoding="utf-8-sig", newline="") as f:
             writer = csv.writer(f)
             writer.writerow([
-                "id", "event_id", "track_id", "ts", "iso", "source", "class_id", "class_name",
+                "id", "event_id", "session_id", "track_id", "track_id_namespace",
+                "ts", "iso", "source", "class_id", "class_name",
                 "confidence", "severity", "models", "pipeline_mode", "config_fingerprint", "risk_type",
                 "stable_state", "risk_state", "confirmation_delay", "review", "snapshot",
             ])
             for a in self.alerts_model.items:
                 writer.writerow([
-                    a.id, getattr(a, "event_id", ""), getattr(a, "track_id", ""),
+                    a.id, getattr(a, "event_id", ""), getattr(a, "session_id", ""),
+                    getattr(a, "track_id", ""), getattr(a, "track_id_namespace", ""),
                     a.ts, time.strftime('%Y-%m-%dT%H:%M:%S', time.localtime(a.ts)),
                     a.source_id, a.cls, class_display_name(a.cls, self.lang_code), "%.4f" % a.conf,
                     getattr(a, "severity", "info"), ";".join(getattr(a, "model_ids", ()) or ()),

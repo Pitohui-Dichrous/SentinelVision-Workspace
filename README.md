@@ -13,7 +13,7 @@
 - Baseline / Proposed 实验方法：[docs/EXPERIMENT_PROTOCOL_CN.md](docs/EXPERIMENT_PROTOCOL_CN.md)
 - 硕士课程设计技术摘要：[docs/MASTER_PROJECT_TECHNICAL_SUMMARY_CN.md](docs/MASTER_PROJECT_TECHNICAL_SUMMARY_CN.md)
 
-检测台现在提供显式的“兼容基线 / PPE 时序增强”分析模式。增强模式在不改动 YOLOv5 权重的前提下加入安全帽互斥类别冲突消解、逻辑头部 Track ID、多帧稳定状态、每轨迹风险状态机和独立 Event ID；旧设置默认保持兼容基线，Fire 暂时继续使用原有多帧门控。
+检测台现在提供显式的“兼容基线 / PPE 时序增强”分析模式。增强模式在不改动 YOLOv5 权重的前提下加入安全帽互斥类别冲突消解、逻辑头部 Track ID、短时运动辅助重关联、多帧稳定状态、每轨迹风险状态机和独立 Event ID；公开 Track 编号只在候选确认后分配，单帧噪声不会造成编号跳跃。旧设置默认保持兼容基线，Fire 暂时继续使用原有多帧门控。
 
 当前交付是 PPE 的首个研究纵切，不包含 Fire Temporal、Dynamic Risk、Hard Example Collector、Watchdog、自动 trace 双重放/实验报告、自动训练优化或 Dynamic ROI；这些能力不会在文档中被当成已经完成。
 

@@ -23,7 +23,8 @@ YOLOv5
 ```text
 同一 YOLOv5 detection
 + PPEConflictResolver
-+ 类别无关 HeadTracker
++ 类别无关 HeadTracker（严格关联 + 短时重关联）
++ confirmed-only 公开 Track 编号
 + N-of-M / EMA / missing tolerance / hysteresis
 + 每 Track 风险状态机
 + 每 episode Event ID
@@ -42,6 +43,7 @@ Fire 在本阶段不进入 Proposed 对比，仍使用现有路径，避免把�
 - 相同 ROI / Mask；
 - 相同类别映射；
 - 相同安全管线配置指纹；
+- 相同算法 schema、重关联阈值和会话重置边界；
 - 相同 ground-truth 事件区间。
 
 最佳方法是“推理一次、检测 trace 双重放”：先保存 canonical detection，再把完全相同的 trace 分别送入 Baseline 和 Proposed。这样 GPU 速度、视频解码和模型随机性不会成为混杂变量。当前版本已经把纯算法层与 Qt/Torch 分离，并提供确定性单元测试；自动 trace 录制和双重放 CLI 是实验工具的下一阶段，不能在尚未实现时声称已经自动生成完整对比报告。
@@ -92,8 +94,12 @@ ground truth 不能只标“这段视频有违规”，至少应包含：
 | Detection flicker rate | 单位时间或单位 Track 的状态翻转次数 | raw/stable trace |
 | Confirmed events | 风险状态机创建的 Event 数 | Event journal |
 | Suppressed transients | SUSPECT 后恢复、未升级为 Event 的 episode 数 | 状态转换记录 |
+| ID switch rate | 同一 ground-truth 主体错误变更公开 Track ID 的次数 / 有效轨迹时长 | 主体标注与 Track trace |
+| Track fragmentation | 同一 ground-truth 主体被拆成的公开 Track 段数 | 主体标注与 Track trace |
+| False inheritance rate | 新主体错误继承旧公开 Track / 风险状态的次数 | 主体标注与关联 trace |
+| Reacquisition success rate | 短时丢失后正确继承旧 Track 的次数 / 可重关联案例 | 丢失区间与主体标注 |
 
-当前 UI 已实时显示处理帧数、活动 Track、已消解冲突和 Event 数；事件导出包含 Track/Event、稳定状态、风险状态与确认延迟；`.runtime/events/ppe_events.jsonl` 可追踪状态转换和人工结论。
+当前 UI 已实时显示处理帧数、活动公开 Track、已消解冲突和 Event 数；事件导出包含 Session/Track/Event、稳定状态、风险状态与确认延迟；`.runtime/events/ppe_events.jsonl` 可追踪状态转换和人工结论。统计必须先按 `session_id` 分组，不能把不同会话中相同的裸 `track_id` 当成同一目标。
 
 False alarm 需要人工复核；Missed event rate 必须依赖独立 ground truth。不得把“没有触发告警”自动当成正确负样本。
 
@@ -112,6 +118,11 @@ False alarm 需要人工复核；Missed event rate 必须依赖独立 ground tru
 - 0.91 与 0.90 输出 UNCERTAIN，不触发未戴帽事件；
 - 两个相邻头部不被错误合并；
 - `hat ↔ person` 抖动仍保持同一 Track ID；
+- 单人短时漏检且普通 IoU 不足、重关联约束满足时继承同一公开 Track ID；
+- 超过保留时间后重现会获得新 Track ID；
+- 多个旧 Track 对同一观测关系含糊时拒绝继承；
+- 单帧候选误检不显示也不消耗公开编号，首个确认目标仍是 `Track #1`；
+- 在固定真实丢失时长下，不同 `DETECT_EVERY_N` 使用相同秒制退休边界，但证据采样率仍作为控制变量固定；
 - 单帧错误不翻转稳定状态；
 - Track 17 在冷却时，Track 26 可独立报警；
 - 同一 episode 不重复创建 Event；

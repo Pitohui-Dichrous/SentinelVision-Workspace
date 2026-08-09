@@ -60,7 +60,8 @@ class ResolutionFrame:
 
 @dataclass(frozen=True)
 class TrackedHead:
-    track_id: int
+    candidate_id: int
+    track_id: Optional[int]
     observation: HeadObservation
     box: Box
     first_seen: float
@@ -74,8 +75,20 @@ class TrackedHead:
 @dataclass(frozen=True)
 class TrackerFrame:
     visible: Tuple[TrackedHead, ...]
-    missing_track_ids: Tuple[int, ...]
-    retired_track_ids: Tuple[int, ...]
+    missing_candidate_ids: Tuple[int, ...]
+    retired_candidate_ids: Tuple[int, ...]
+
+    @property
+    def missing_track_ids(self) -> Tuple[int, ...]:
+        """Compatibility alias; values belong to the private candidate namespace."""
+
+        return self.missing_candidate_ids
+
+    @property
+    def retired_track_ids(self) -> Tuple[int, ...]:
+        """Compatibility alias; values belong to the private candidate namespace."""
+
+        return self.retired_candidate_ids
 
 
 @dataclass(frozen=True)
@@ -147,6 +160,7 @@ class PipelineMetrics:
     confirmed_events: int
     alerts_emitted: int
     active_tracks: int
+    active_candidates: int = 0
 
     def as_dict(self) -> Mapping[str, Any]:
         return {
@@ -162,6 +176,7 @@ class PipelineMetrics:
             "confirmed_events": self.confirmed_events,
             "alerts_emitted": self.alerts_emitted,
             "active_tracks": self.active_tracks,
+            "active_candidates": self.active_candidates,
         }
 
 

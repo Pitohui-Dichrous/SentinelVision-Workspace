@@ -4,7 +4,7 @@
 # exact legacy behavior until an operator explicitly enables PPE temporal mode.
 # Values below are engineering starting points for controlled experiments, not
 # industrial standards or certified safety thresholds.
-schema_version: 1
+schema_version: 2
 default_mode: baseline
 
 ppe:
@@ -19,9 +19,23 @@ ppe:
 
   tracking:
     iou_threshold: 0.30
-    max_lost_frames: 6
     min_hits: 2
     smoothing_alpha: 0.70
+    loss_tolerance:
+      unit: seconds
+      value: 1.00
+    tentative_loss_tolerance:
+      unit: seconds
+      value: 0.40
+    reacquisition:
+      enabled: true
+      min_iou: 0.10
+      max_center_distance_ratio: 0.65
+      min_area_ratio: 0.65
+      ambiguity_margin: 0.10
+      motion_max_seconds: 0.50
+      velocity_alpha: 0.65
+    public_id_policy: confirmed_only
 
   temporal:
     window_size: 8

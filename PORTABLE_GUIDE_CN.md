@@ -45,7 +45,7 @@ SENTINEL 每次启动扫描 `RESULTS`，按复选框加载模型，不再存在 
 
 ## PPE 时序安全管线
 
-检测台保留“兼容基线”，并提供可显式启用的“PPE 时序增强”。增强算法全部位于工作库源码中，不增加网络下载、外部服务或新的二进制依赖；便携 Python 已有的 PyYAML 足以读取版本化配置。
+检测台保留“兼容基线”，并提供可显式启用的“PPE 时序增强”。增强算法全部位于工作库源码中，不增加网络下载、外部服务或新的二进制依赖；便携 Python 已有的 PyYAML 足以读取版本化配置。短时重关联和 confirmed-only 公开编号均为纯 Python 逻辑，秒制丢失容忍复用现有管线时钟。
 
 - Git 跟踪默认配置：`config/safety_pipeline.yaml`；
 - 当前电脑的模式选择：`.runtime/config/sentinel_settings.json`；

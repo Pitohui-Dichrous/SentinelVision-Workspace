@@ -71,18 +71,30 @@ class HeadTrackerTests(unittest.TestCase):
             head(PPEState.HELMET, box=(0.0, 0.0, 100.0, 100.0)),
             head(PPEState.NO_HELMET, box=(-53.0, 0.0, 47.0, 100.0)),
         ), 0.0)
-        self.assertEqual([item.track_id for item in first_frame.visible], [1, 2])
+        helmet_track = next(
+            item for item in first_frame.visible
+            if item.observation.state == PPEState.HELMET
+        )
+        nohelmet_track = next(
+            item for item in first_frame.visible
+            if item.observation.state == PPEState.NO_HELMET
+        )
 
         second_frame = tracker.update((
             head(PPEState.HELMET, box=(0.0, 0.0, 100.0, 100.0)),
             head(PPEState.NO_HELMET, box=(52.0, 0.0, 152.0, 100.0)),
         ), 1.0)
 
-        visible = {item.track_id: item for item in second_frame.visible}
-        self.assertEqual(set(visible), {1, 3})
-        self.assertEqual(visible[1].box, (0.0, 0.0, 100.0, 100.0))
-        self.assertEqual(visible[1].observation.state, PPEState.HELMET)
-        self.assertEqual(second_frame.missing_track_ids, (2,))
+        visible = {item.candidate_id: item for item in second_frame.visible}
+        self.assertIn(helmet_track.candidate_id, visible)
+        preserved = visible[helmet_track.candidate_id]
+        self.assertEqual(preserved.track_id, helmet_track.track_id)
+        self.assertEqual(preserved.box, (0.0, 0.0, 100.0, 100.0))
+        self.assertEqual(preserved.observation.state, PPEState.HELMET)
+        self.assertEqual(
+            second_frame.missing_candidate_ids,
+            (nohelmet_track.candidate_id,),
+        )
 
     def test_short_loss_is_retained_then_retired(self):
         tracker = HeadTracker(TrackingConfig(max_lost_frames=2, min_hits=1))

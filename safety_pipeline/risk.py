@@ -15,6 +15,7 @@ LOGGER = logging.getLogger(__name__)
 
 @dataclass
 class _RiskTrack:
+    public_track_id: Optional[int] = None
     state: RiskState = RiskState.NORMAL
     violation_frames: int = 0
     suspect_frames: int = 0
@@ -55,20 +56,24 @@ class PPERiskStateMachine:
         self.confirmed_events = 0
         self.alerts_emitted = 0
 
-    def state_for(self, track_id: int) -> RiskState:
-        return self._tracks.get(track_id, _RiskTrack()).state
+    def state_for(self, candidate_id: int) -> RiskState:
+        """Return state from the private tracker-candidate namespace."""
 
-    def remove(self, track_id: int, timestamp: float) -> Tuple[StateTransition, ...]:
-        track = self._tracks.pop(track_id, None)
+        return self._tracks.get(candidate_id, _RiskTrack()).state
+
+    def remove(self, candidate_id: int, timestamp: float) -> Tuple[StateTransition, ...]:
+        """Retire candidate-owned state without leaking a tentative ID."""
+
+        track = self._tracks.pop(candidate_id, None)
         if track is None:
             return ()
         if track.state == RiskState.SUSPECT:
             self.suppressed_transients += 1
-        if track.state == RiskState.NORMAL:
+        if track.state == RiskState.NORMAL or track.public_track_id is None:
             return ()
         return (
             StateTransition(
-                track_id=track_id,
+                track_id=track.public_track_id,
                 risk_type=self.RISK_TYPE,
                 from_state=track.state,
                 to_state=RiskState.NORMAL,
@@ -78,10 +83,10 @@ class PPERiskStateMachine:
             ),
         )
 
-    def observe_raw(self, track_id: int, raw_state: PPEState, timestamp: float) -> None:
+    def observe_raw(self, candidate_id: int, raw_state: PPEState, timestamp: float) -> None:
         """Record pre-confirmation evidence without advancing the risk state."""
 
-        track = self._tracks.setdefault(track_id, _RiskTrack())
+        track = self._tracks.setdefault(candidate_id, _RiskTrack())
         if raw_state == PPEState.NO_HELMET and track.raw_first_seen is None:
             track.raw_first_seen = timestamp
         elif raw_state == PPEState.HELMET and track.state == RiskState.NORMAL:
@@ -89,7 +94,7 @@ class PPERiskStateMachine:
 
     def update(
         self,
-        track_id: int,
+        candidate_id: int,
         stable_state: PPEState,
         confidence: float,
         timestamp: float,
@@ -97,13 +102,15 @@ class PPERiskStateMachine:
         source_model_ids: Tuple[str, ...],
         raw_state: PPEState = PPEState.UNKNOWN,
         alerts_enabled: bool = True,
+        public_track_id: Optional[int] = None,
     ) -> RiskUpdate:
-        track = self._tracks.setdefault(track_id, _RiskTrack())
+        track = self._tracks.setdefault(candidate_id, _RiskTrack())
+        track_id = self._bind_public_track_id(candidate_id, track, public_track_id)
         alerts: List[PipelineAlert] = []
         transitions: List[StateTransition] = []
         violating = stable_state == PPEState.NO_HELMET
         recovered = stable_state == PPEState.HELMET
-        self.observe_raw(track_id, raw_state, timestamp)
+        self.observe_raw(candidate_id, raw_state, timestamp)
 
         if track.state == RiskState.NORMAL:
             if violating:
@@ -204,6 +211,35 @@ class PPERiskStateMachine:
                 track.recovery_frames = 0
 
         return RiskUpdate(track.state, tuple(alerts), tuple(transitions))
+
+    @staticmethod
+    def _bind_public_track_id(
+        candidate_id: int,
+        track: _RiskTrack,
+        public_track_id: Optional[int],
+    ) -> int:
+        """Bind an immutable public ID while keeping v1 direct calls compatible.
+
+        Legacy callers supplied only one ID because schema v1 exposed candidate
+        IDs immediately.  Omitting ``public_track_id`` therefore preserves that
+        behavior; schema v2 callers pass the tracker-assigned public ID.
+        """
+
+        resolved_id = (
+            track.public_track_id
+            if public_track_id is None and track.public_track_id is not None
+            else candidate_id if public_track_id is None else public_track_id
+        )
+        if isinstance(resolved_id, bool) or not isinstance(resolved_id, int) or resolved_id < 1:
+            raise ValueError("public_track_id must be a positive integer")
+        if track.public_track_id is None:
+            track.public_track_id = resolved_id
+        elif track.public_track_id != resolved_id:
+            raise ValueError(
+                "candidate %s is already bound to public track %s"
+                % (candidate_id, track.public_track_id)
+            )
+        return resolved_id
 
     def _emit_alert(
         self,

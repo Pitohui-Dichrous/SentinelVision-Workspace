@@ -41,6 +41,13 @@ def _integer(mapping: Mapping[str, Any], key: str, default: int, minimum: int) -
     return value
 
 
+def _boolean(mapping: Mapping[str, Any], key: str, default: bool) -> bool:
+    value = mapping.get(key, default)
+    if not isinstance(value, bool):
+        raise ConfigError("%s must be a boolean" % key)
+    return value
+
+
 def _number(
     mapping: Mapping[str, Any],
     key: str,
@@ -98,18 +105,80 @@ class PPEConflictConfig:
 @dataclass(frozen=True)
 class TrackingConfig:
     iou_threshold: float = 0.30
-    max_lost_frames: int = 6
     min_hits: int = 2
     smoothing_alpha: float = 0.70
+    max_lost_frames: Optional[int] = None
+    max_lost_seconds: Optional[float] = 1.00
+    tentative_max_lost_seconds: float = 0.40
+    reacquire_enabled: bool = True
+    reacquire_min_iou: float = 0.10
+    reacquire_max_center_distance_ratio: float = 0.65
+    reacquire_min_area_ratio: float = 0.65
+    reacquire_ambiguity_margin: float = 0.10
+    motion_max_seconds: float = 0.50
+    velocity_alpha: float = 0.65
+    public_id_policy: str = "confirmed_only"
 
     @classmethod
-    def from_mapping(cls, value: Any) -> "TrackingConfig":
+    def from_mapping(cls, value: Any, schema_version: int = 2) -> "TrackingConfig":
         data = _mapping(value, "ppe.tracking")
-        return cls(
+        common = dict(
             iou_threshold=_number(data, "iou_threshold", cls.iou_threshold, 0.0, 1.0),
-            max_lost_frames=_integer(data, "max_lost_frames", cls.max_lost_frames, 0),
             min_hits=_integer(data, "min_hits", cls.min_hits, 1),
             smoothing_alpha=_number(data, "smoothing_alpha", cls.smoothing_alpha, 0.0, 1.0),
+        )
+        if schema_version == 1:
+            return cls(
+                **common,
+                max_lost_frames=_integer(data, "max_lost_frames", 6, 0),
+                max_lost_seconds=None,
+                tentative_max_lost_seconds=0.0,
+                reacquire_enabled=False,
+                public_id_policy="immediate",
+            )
+
+        loss = _mapping(data.get("loss_tolerance"), "ppe.tracking.loss_tolerance")
+        tentative_loss = _mapping(
+            data.get("tentative_loss_tolerance"),
+            "ppe.tracking.tentative_loss_tolerance",
+        )
+        for field_name, duration in (
+            ("ppe.tracking.loss_tolerance", loss),
+            ("ppe.tracking.tentative_loss_tolerance", tentative_loss),
+        ):
+            if _text(duration, "unit", "seconds") != "seconds":
+                raise ConfigError("%s.unit must be seconds" % field_name)
+        reacquire = _mapping(data.get("reacquisition"), "ppe.tracking.reacquisition")
+        public_id_policy = _text(
+            data,
+            "public_id_policy",
+            cls.public_id_policy,
+        )
+        if public_id_policy not in {"confirmed_only", "immediate"}:
+            raise ConfigError("ppe.tracking.public_id_policy must be confirmed_only or immediate")
+        max_lost_seconds = _number(loss, "value", 1.00, 0.0, 60.0)
+        tentative_max_lost_seconds = _number(tentative_loss, "value", 0.40, 0.0, 10.0)
+        if tentative_max_lost_seconds > max_lost_seconds:
+            raise ConfigError("tentative loss tolerance cannot exceed confirmed loss tolerance")
+        return cls(
+            **common,
+            max_lost_frames=None,
+            max_lost_seconds=max_lost_seconds,
+            tentative_max_lost_seconds=tentative_max_lost_seconds,
+            reacquire_enabled=_boolean(reacquire, "enabled", True),
+            reacquire_min_iou=_number(reacquire, "min_iou", 0.10, 0.0, 1.0),
+            reacquire_max_center_distance_ratio=_number(
+                reacquire, "max_center_distance_ratio", 0.65, 0.0, 4.0
+            ),
+            reacquire_min_area_ratio=_number(
+                reacquire, "min_area_ratio", 0.65, 0.0, 1.0
+            ),
+            reacquire_ambiguity_margin=_number(
+                reacquire, "ambiguity_margin", 0.10, 0.0, 1.0
+            ),
+            motion_max_seconds=_number(reacquire, "motion_max_seconds", 0.50, 0.0, 10.0),
+            velocity_alpha=_number(reacquire, "velocity_alpha", 0.65, 0.0, 1.0),
+            public_id_policy=public_id_policy,
         )
 
 
@@ -160,7 +229,7 @@ class RiskConfig:
 
 @dataclass(frozen=True)
 class SafetyPipelineConfig:
-    schema_version: int = 1
+    schema_version: int = 2
     default_mode: str = "baseline"
     conflict: PPEConflictConfig = PPEConflictConfig()
     tracking: TrackingConfig = TrackingConfig()
@@ -171,7 +240,7 @@ class SafetyPipelineConfig:
     def from_mapping(cls, value: Any) -> "SafetyPipelineConfig":
         data = _mapping(value, "root")
         schema_version = _integer(data, "schema_version", cls.schema_version, 1)
-        if schema_version != 1:
+        if schema_version not in (1, 2):
             raise ConfigError("unsupported safety pipeline schema_version: %s" % schema_version)
         default_mode = _text(data, "default_mode", cls.default_mode)
         if default_mode not in SUPPORTED_MODES:
@@ -181,7 +250,7 @@ class SafetyPipelineConfig:
             schema_version=schema_version,
             default_mode=default_mode,
             conflict=PPEConflictConfig.from_mapping(ppe.get("conflict")),
-            tracking=TrackingConfig.from_mapping(ppe.get("tracking")),
+            tracking=TrackingConfig.from_mapping(ppe.get("tracking"), schema_version=schema_version),
             temporal=TemporalConfig.from_mapping(ppe.get("temporal")),
             risk=RiskConfig.from_mapping(ppe.get("risk")),
         )

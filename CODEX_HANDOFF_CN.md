@@ -26,7 +26,7 @@ Set-Location 'E:\SentinelVision_Workspace'
 - 工作库自带 Windows x64 Python 3.11.9、PyTorch 2.2.1+cu118、PySide6、完整训练依赖、离线修复包、便携 Git 和 GitHub CLI。
 - 已在 RTX 4080 Laptop 上通过 CUDA、自检、模型加载和多模型切换测试；目标公共电脑 RTX 4090 只需安装兼容 CUDA 11.8 的 NVIDIA 驱动，不需要另装 Python 或 CUDA Toolkit。
 - UI 已重做为现代深色工作台，包含“开始”“训练新模型”“审核与部署”“已部署模型”四页。原 SENTINEL 的已有视频、摄像头、告警、截图和检测功能均保留。
-- 检测台已加入可回退的 PPE 时序增强：`hat/person` 冲突消解、逻辑头部 Track ID、N-of-M/EMA/滞回、每 Track 风险状态机、Event ID 与结构化事件日志。旧设置默认仍使用兼容基线，Fire 暂时保留原路径。
+- 检测台已加入可回退的 PPE 时序增强：`hat/person` 冲突消解、confirmed-only 公开 Track ID、短时运动辅助重关联、N-of-M/EMA/滞回、每 Track 风险状态机、Event ID 与结构化事件日志。单帧候选不占用公开编号；旧设置默认仍使用兼容基线，Fire 暂时保留原路径。
 - 训练和检测代码均使用相对路径；交接前使用 Git 跟踪文件搜索确认，没有 `D:\python`、`D:/python` 或其他 D 盘路径硬编码。
 
 ## 模型训练与数据集
@@ -76,7 +76,7 @@ Set-Location 'E:\SentinelVision_Workspace'
 
 当前本机设置文件 `.runtime/config/sentinel_settings.json` 中选择的是 `COMBINED`。这只是当前电脑的用户选择，不是代码默认值；用户可以在 SENTINEL 中自行更改，程序会记住选择。多模型推理目前在同一个检测循环内顺序执行，会增加显存占用和单帧耗时；它不是多 CUDA 流并发实现。
 
-PPE 默认算法参数位于 `config/safety_pipeline.yaml`。当前本机 `.runtime/config/sentinel_settings.json` 仍为 schema 2、没有模式 override，因此使用兼容基线；用户首次保存分析设置后才会升级为 schema 3。低频风险转换、告警和人工复核追加到 `.runtime/events/ppe_events.jsonl`。配置无效时 UI 会 fail-closed 锁定基线。架构、配置、实验方法和课程设计摘要位于 `docs/`。
+PPE 默认算法参数位于 `config/safety_pipeline.yaml`，其算法配置当前为 schema 2；本机 `.runtime/config/sentinel_settings.json` 是另一套用户设置 schema，当前仍为 schema 2、没有模式 override，因此使用兼容基线，用户首次保存分析设置后才会升级为 schema 3。低频风险转换、告警和人工复核追加到 `.runtime/events/ppe_events.jsonl`。配置无效时 UI 会 fail-closed 锁定基线。架构、配置、实验方法和课程设计摘要位于 `docs/`。
 
 不要把当前实验初值写成行业标准。Phase 6 Fire Temporal、Phase 7 Dynamic Risk、Phase 8 Hard Sample、Phase 9 Watchdog、Phase 11 自动优化和 Phase 12 Dynamic ROI 尚未实现；Phase 10 只完成指标/日志/实验协议基础，自动 trace、双重放与报告工具仍待后续。
 
@@ -114,8 +114,8 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File '.\portable\sync_github.
 - 10 个预训练权重均能作为 checkpoint 读取，P5/P6 配置映射正确；
 - 训练安全边界、人工审核门禁、部署归档和动态 `RESULTS` 扫描通过测试；
 - 快速关键文件检查与完整环境自检通过；
-- PPE 纯算法、集成契约与离屏 UI 共 57 项 unittest 全部通过；
-- 当前 `main` 比 `origin/main` 领先 1 个既有 UI 提交，本轮 PPE 修改按用户规则保持未提交、未推送；保护目录没有进入 Git。
+- PPE 纯算法、双 ID/短时重关联、集成契约与离屏 UI 共 84 项 unittest 全部通过；
+- 当前 `main` 比 `origin/main` 领先 3 个本地提交（UI、PPE 时序管线、轨迹重关联），均未推送；保护目录没有进入 Git。
 
 ## 新账号继续工作时的原则
 

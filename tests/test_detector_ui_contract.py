@@ -170,6 +170,42 @@ class DetectorUIContractTests(unittest.TestCase):
         self.assertEqual(worker.last_alert_at[("camera-01", "fire")], 12.0)
         self.assertNotIn(("camera-01", "person"), worker.last_alert_at)
 
+    def test_public_track_session_is_preserved_in_alert_and_review_journal(self):
+        worker = SentinelVision4.VideoWorker(
+            SentinelVision4.CATALOG_SNAPSHOT,
+            SentinelVision4.SAFETY_PIPELINE_DEFAULTS,
+        )
+        worker.event_journal = mock.Mock()
+        alert = {
+            "id": "session-a-ppe-0001-001",
+            "event_id": "session-a-ppe-0001-001",
+            "session_id": "session-a",
+            "track_id": 1,
+            "track_id_namespace": "session_public",
+            "source_id": "camera-01",
+            "cls": "person",
+        }
+
+        worker.record_alert(alert)
+        worker.record_review(
+            alert["id"],
+            "valid",
+            alert["track_id"],
+            alert["event_id"],
+            alert["session_id"],
+            alert["track_id_namespace"],
+        )
+
+        alert_record = worker.event_journal.append.call_args_list[0]
+        review_record = worker.event_journal.append.call_args_list[1]
+        self.assertEqual(alert_record.args[0], "alert")
+        self.assertEqual(alert_record.args[1]["session_id"], "session-a")
+        self.assertEqual(alert_record.args[1]["track_id"], 1)
+        self.assertEqual(alert_record.args[1]["track_id_namespace"], "session_public")
+        self.assertEqual(review_record.args[0], "human_review")
+        self.assertEqual(review_record.args[1]["session_id"], "session-a")
+        self.assertEqual(review_record.args[1]["track_id"], 1)
+
 
 if __name__ == "__main__":
     unittest.main()

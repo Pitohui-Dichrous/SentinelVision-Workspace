@@ -14,11 +14,11 @@ config/safety_pipeline.yaml
 .runtime/config/sentinel_settings.json
 ```
 
-前者进入 Git，后者属于可重建运行状态并被 `.gitignore` 排除。算法代码不包含盘符路径。
+前者进入 Git，后者属于可重建运行状态并被 `.gitignore` 排除。两者的 schema 相互独立：算法 YAML 当前是 schema 2，用户设置在保存分析选项后是 schema 3。算法代码不包含盘符路径。
 
 ## 运行模式与兼容性
 
-`config/safety_pipeline.yaml` 的 `default_mode` 当前为 `baseline`。旧 schema 1/2 设置没有 `safety_pipeline` 字段时仍进入兼容基线，不会静默改变已部署系统的报警行为。
+`config/safety_pipeline.yaml` 的 `default_mode` 当前为 `baseline`。旧的用户设置 schema 1/2 没有 `safety_pipeline` 字段时仍进入兼容基线，不会静默改变已部署系统的报警行为。
 
 用户在检测 Inspector 中明确选择增强模式后，设置升级为 schema 3，例如：
 
@@ -66,11 +66,24 @@ config/safety_pipeline.yaml
 | 字段 | 默认值 | 含义 |
 | --- | ---: | --- |
 | `iou_threshold` | 0.30 | 逻辑头部轨迹匹配阈值；与 YOLO NMS IoU 分离 |
-| `max_lost_frames` | 6 | 短暂丢失容忍帧数 |
 | `min_hits` | 2 | Track 进入风险判断前的最少命中 |
 | `smoothing_alpha` | 0.70 | 新框在平滑框中的权重 |
+| `loss_tolerance.value` | 1.00 s | 已确认 Track 的最长丢失保留时间 |
+| `tentative_loss_tolerance.value` | 0.40 s | 未确认候选的最长丢失保留时间 |
+| `reacquisition.enabled` | true | 是否对严格匹配失败的已确认 Track 尝试短时重关联 |
+| `reacquisition.min_iou` | 0.10 | 预测框重关联的最低 IoU |
+| `reacquisition.max_center_distance_ratio` | 0.65 | 中心距离相对框尺度上限 |
+| `reacquisition.min_area_ratio` | 0.65 | 新旧框最小面积比例 |
+| `reacquisition.ambiguity_margin` | 0.10 | 最优与次优候选不足该差值时拒绝继承 |
+| `reacquisition.motion_max_seconds` | 0.50 s | 速度预测允许外推的最长时间 |
+| `reacquisition.velocity_alpha` | 0.65 | 当前观测速度进入 EMA 的权重 |
+| `public_id_policy` | `confirmed_only` | 仅确认后分配公开 Track 编号 |
 
-Tracker 在 IoU 门限内求“允许不匹配的最大总 IoU”，不会为了多匹配一个边缘框而交换两个既有 Track 的身份。Resolver 使用不同目标：先最大化可消解冲突对数量，再比较总权重。
+Tracker 先在普通 IoU 门限内求“允许不匹配的最大总 IoU”；轨迹一旦经历检测间隙，即使重新达到严格 IoU，也必须先通过唯一性差值。严格关联失败后，只对尚未匹配的已确认 Track 使用预测框尝试短时重关联。重关联必须同时满足 IoU、中心距离、面积比例和双向唯一性差值；多人关系含糊时拒绝继承并创建新候选。Resolver 使用不同目标：先最大化可消解冲突对数量，再比较总权重。
+
+内部 `candidate_id` 从首帧开始积累时序证据，但不会进入普通 UI、告警或导出。候选达到 `min_hits` 后才获得会话内连续、单调且不复用的公开 `track_id`；因此一帧误检不会再消耗用户看到的编号。公开编号必须与 `session_id` 组合使用，不能跨会话仅按裸 `track_id` 汇总。
+
+算法 schema 1 仍可读取：旧 `max_lost_frames` 按“未匹配的推理更新次数”计数，重关联关闭，公开 ID 立即分配，从而保留旧实验行为。schema 2 改为管线时间的秒制容忍；`DETECT_EVERY_N` 不再改变单位，但仍会改变实际可用于重关联和 N-of-M 的证据密度，正式实验必须固定推理采样率。
 
 ### `ppe.temporal`
 
@@ -99,8 +112,9 @@ Tracker 在 IoU 门限内求“允许不匹配的最大总 IoU”，不会为了
 
 ## 校验和失败策略
 
-- schema 版本、类型、数值范围和类别 ID 会在启动时校验；
+- 算法 schema 1/2、类型、数值范围、时间单位和类别 ID 会在启动时校验；
 - 配置文件缺失、YAML 错误或字段越界时记录 warning、回退内置参数并锁定兼容基线；此前保存的增强模式不会覆盖该 fail-closed 状态，修复配置后重启才可重新选择；
+- 旧程序不认识算法 schema 2 时同样按既有 fail-closed 规则回到基线，不会静默忽略重关联字段；
 - UI 只暴露模式和调试显示，算法阈值不堆在主页面；
 - 模式或 PPE 类别开关变化只清空 PPE 轨迹、证据、状态机和 session；视频源或模型变化会清空全部时序状态；Fire 的旧冷却不会被无关 PPE 开关抹除；
 - 每个增强事件保存配置 SHA-256 指纹，便于实验复现。
@@ -115,7 +129,7 @@ Tracker 在 IoU 门限内求“允许不匹配的最大总 IoU”，不会为了
 - 告警事件；
 - 人工“有效/误报”结论。
 
-它不会逐帧保存画面或 detection，避免 24 小时运行时无界增长。完整逐帧实验 trace 应在后续实验工具中显式开启，并继续写入 `.runtime/experiments`。
+增强记录使用 `session_id + track_id + event_id` 串联：`track_id` 只在单个 PPE 管线会话内有效，`candidate_id` 永不写入普通事件记录。它不会逐帧保存画面或 detection，避免 24 小时运行时无界增长。完整逐帧实验 trace 应在后续实验工具中显式开启，并继续写入 `.runtime/experiments`。
 
 ## 测试命令
 

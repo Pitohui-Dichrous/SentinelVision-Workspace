@@ -98,23 +98,26 @@ class PPETemporalPipeline:
         transitions: List[StateTransition] = []
         alerts = []
         detections: List[PipelineDetection] = []
-        for track_id in tracker_frame.missing_track_ids:
-            self.temporal.update_missing(track_id)
-        for track_id in tracker_frame.retired_track_ids:
-            self.temporal.remove(track_id)
-            transitions.extend(self.risk.remove(track_id, timestamp))
+        for candidate_id in tracker_frame.missing_candidate_ids:
+            self.temporal.update_missing(candidate_id)
+        for candidate_id in tracker_frame.retired_candidate_ids:
+            self.temporal.remove(candidate_id)
+            transitions.extend(self.risk.remove(candidate_id, timestamp))
 
         protected_id = self.config.conflict.protected_class_id
         unprotected_id = self.config.conflict.unprotected_class_id
         uncertain_id = self.config.conflict.uncertain_class_id
         for tracked in tracker_frame.visible:
-            estimate = self.temporal.update(tracked.track_id, tracked.observation)
-            self.risk.observe_raw(tracked.track_id, estimate.raw_state, timestamp)
+            candidate_id = tracked.candidate_id
+            estimate = self.temporal.update(candidate_id, tracked.observation)
+            self.risk.observe_raw(candidate_id, estimate.raw_state, timestamp)
             if estimate.changed:
                 self._stable_state_changes += 1
             if tracked.confirmed:
+                if tracked.track_id is None:
+                    raise RuntimeError("confirmed tracker candidate has no public track ID")
                 risk_update = self.risk.update(
-                    track_id=tracked.track_id,
+                    candidate_id=candidate_id,
                     stable_state=estimate.stable_state,
                     confidence=estimate.stable_confidence,
                     timestamp=timestamp,
@@ -122,12 +125,20 @@ class PPETemporalPipeline:
                     source_model_ids=tracked.observation.source_model_ids,
                     raw_state=estimate.raw_state,
                     alerts_enabled=alerts_enabled,
+                    public_track_id=tracked.track_id,
                 )
                 risk_state = risk_update.state
                 alerts.extend(risk_update.alerts)
                 transitions.extend(risk_update.transitions)
             else:
                 risk_state = RiskState.NORMAL
+
+            # Schema v2 keeps tentative candidates private.  Schema v1's
+            # immediate policy still supplies a public ID before confirmation,
+            # preserving its historical rendering contract without advancing
+            # the risk state early.
+            if tracked.track_id is None:
+                continue
 
             if estimate.stable_state == PPEState.HELMET:
                 class_id = protected_id
@@ -166,6 +177,7 @@ class PPETemporalPipeline:
             confirmed_events=self.risk.confirmed_events,
             alerts_emitted=self.risk.alerts_emitted,
             active_tracks=self.tracker.active_count,
+            active_candidates=self.tracker.candidate_count,
         )
         return PipelineFrame(
             detections=tuple(detections),
