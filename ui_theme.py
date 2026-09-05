@@ -1,87 +1,50 @@
-"""Liquid Glass design system shared by the SentinelVision desktop apps.
-
-Qt Style Sheets cannot blur the content behind a widget.  The theme therefore
-uses translucent, cyan-tinted layers, bright hairline borders and restrained
-shadows to preserve the same depth hierarchy without relying on unsupported
-CSS properties.
-"""
+"""Neutral, typography-led design system for the SentinelVision desktop apps."""
 
 from __future__ import annotations
 
 import os
+from pathlib import Path
 
 from PySide6 import QtCore, QtGui, QtWidgets
 
 
-# The original public keys remain available for older screens.  Additional
-# tokens describe the translucent material layers used by the new theme.
-DARK = {
-    "bg": "#061119",
-    "surface": "#0B202C",
-    "surface_alt": "#102D3C",
-    "surface_hover": "#164359",
-    "border": "#254958",
-    "border_strong": "#3F7B8D",
-    "text": "#F2FBFF",
-    "muted": "#A8C0C9",
-    "subtle": "#718C97",
-    "primary": "#27C5E7",
-    "primary_hover": "#58DCF2",
-    "cyan": "#7AE7F6",
-    "success": "#54D6A1",
-    "warning": "#F7C66C",
-    "danger": "#FF7384",
-    "bg_gradient": "qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 #061119, stop:0.52 #071A24, stop:1 #05131D)",
-    "sidebar_glass": "qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 rgba(11, 34, 46, 244), stop:1 rgba(7, 25, 36, 230))",
-    "glass": "rgba(10, 30, 42, 222)",
-    "glass_alt": "rgba(16, 45, 59, 210)",
-    "glass_strong": "rgba(18, 55, 70, 232)",
-    "glass_hover": "rgba(44, 104, 122, 150)",
-    "glass_pressed": "rgba(7, 25, 35, 238)",
-    "hairline": "rgba(183, 242, 255, 56)",
-    "hairline_strong": "rgba(176, 240, 255, 112)",
-    "focus": "#9BEFFF",
-    "on_primary": "#03171E",
-    "primary_deep": "#1597C5",
-    "primary_soft": "rgba(39, 197, 231, 42)",
-    "success_soft": "rgba(84, 214, 161, 36)",
-    "warning_soft": "rgba(247, 198, 108, 34)",
-    "danger_soft": "rgba(255, 115, 132, 36)",
-}
+# Keep the public token names compatible with the detection console.
+def _palette(dark):
+    base = {
+        "bg": "#111113" if dark else "#F5F5F7",
+        "surface": "#1C1C1E" if dark else "#FFFFFF",
+        "surface_alt": "#262629" if dark else "#F5F5F7",
+        "surface_hover": "#343438" if dark else "#E8E8ED",
+        "border": "#424247" if dark else "#D2D2D7",
+        "border_strong": "#86868B" if dark else "#86868B",
+        "text": "#F5F5F7" if dark else "#1D1D1F",
+        "muted": "#B8B8BE" if dark else "#626269",
+        "subtle": "#AAAAAF" if dark else "#6E6E73",
+        "primary": "#0066CC",
+        "primary_hover": "#0055AA",
+        "success": "#6ED69A" if dark else "#237A46",
+        "warning": "#F0C46B" if dark else "#916000",
+        "danger": "#FF858A" if dark else "#BC2731",
+        "focus": "#8EC5FF" if dark else "#0066CC",
+        "on_primary": "#FFFFFF",
+        "primary_deep": "#0055AA",
+        "primary_soft": "#173553" if dark else "#EAF3FF",
+        "success_soft": "#18372A" if dark else "#EAF5EE",
+        "warning_soft": "#3A3020" if dark else "#FFF5DF",
+        "danger_soft": "#3B2225" if dark else "#FFF0F0",
+    }
+    for key, source in {
+        "bg_gradient": "bg", "sidebar_glass": "surface", "glass": "surface",
+        "glass_alt": "surface_alt", "glass_strong": "surface", "glass_hover": "surface_hover",
+        "glass_pressed": "surface_alt", "hairline": "border", "hairline_strong": "border_strong",
+        "cyan": "focus" if dark else "primary",
+    }.items():
+        base[key] = base[source]
+    return base
 
-LIGHT = {
-    "bg": "#EAF4F7",
-    "surface": "#F6FBFC",
-    "surface_alt": "#E9F5F7",
-    "surface_hover": "#D9EEF2",
-    "border": "#BCD5DA",
-    "border_strong": "#87B6C0",
-    "text": "#102A34",
-    "muted": "#4F6972",
-    "subtle": "#718991",
-    "primary": "#087FA3",
-    "primary_hover": "#086B8C",
-    "cyan": "#087F99",
-    "success": "#147B5C",
-    "warning": "#9A6410",
-    "danger": "#C33D51",
-    "bg_gradient": "qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 #F1FAFB, stop:0.55 #E8F4F7, stop:1 #DDEEF2)",
-    "sidebar_glass": "qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 rgba(250, 254, 255, 238), stop:1 rgba(229, 243, 246, 226))",
-    "glass": "rgba(250, 254, 255, 220)",
-    "glass_alt": "rgba(229, 245, 248, 210)",
-    "glass_strong": "rgba(252, 255, 255, 238)",
-    "glass_hover": "rgba(185, 225, 233, 166)",
-    "glass_pressed": "rgba(211, 235, 240, 232)",
-    "hairline": "rgba(255, 255, 255, 190)",
-    "hairline_strong": "rgba(81, 144, 158, 118)",
-    "focus": "#056F92",
-    "on_primary": "#FFFFFF",
-    "primary_deep": "#065F7D",
-    "primary_soft": "rgba(8, 127, 163, 30)",
-    "success_soft": "rgba(20, 123, 92, 28)",
-    "warning_soft": "rgba(154, 100, 16, 26)",
-    "danger_soft": "rgba(195, 61, 81, 26)",
-}
+
+DARK = _palette(True)
+LIGHT = _palette(False)
 
 
 def tokens(dark: bool = True):
@@ -129,8 +92,6 @@ def make_card(parent=None, elevated: bool = False):
     frame.setProperty("card", True)
     frame.setProperty("glass", "strong" if elevated else "panel")
     frame.setProperty("elevated", elevated)
-    if elevated:
-        apply_glass_shadow(frame, elevated=True)
     return frame
 
 
@@ -157,6 +118,7 @@ class PressableButton(QtWidgets.QPushButton):
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
+        self.setCursor(QtCore.Qt.CursorShape.PointingHandCursor)
         self._visual_scale = 1.0
         self._mouse_press_active = False
         self._press_inside = False
@@ -210,6 +172,21 @@ class PressableButton(QtWidgets.QPushButton):
             self._animate_scale(1.0, self.RELEASE_DURATION_MS)
         super().mouseReleaseEvent(event)
 
+    def _reset_press(self):
+        self._press_animation.stop()
+        self._mouse_press_active = False
+        self._press_inside = False
+        self._set_visual_scale(1.0)
+
+    def changeEvent(self, event):
+        if event.type() == QtCore.QEvent.Type.EnabledChange and not self.isEnabled():
+            self._reset_press()
+        super().changeEvent(event)
+
+    def hideEvent(self, event):
+        self._reset_press()
+        super().hideEvent(event)
+
     def paintEvent(self, event: QtGui.QPaintEvent) -> None:
         if abs(self._visual_scale - 1.0) < 0.0001:
             super().paintEvent(event)
@@ -250,8 +227,6 @@ def make_glass_panel(
     frame.setProperty("glass", material)
     if card_style:
         frame.setProperty("cardStyle", card_style)
-    if elevated:
-        apply_glass_shadow(frame, elevated=True)
     return frame
 
 
@@ -259,6 +234,7 @@ def build_stylesheet(dark: bool = True) -> str:
     """Build QSS using only properties supported reliably by Qt 6."""
 
     t = tokens(dark)
+    icons = (Path(__file__).resolve().parent / "assets" / "ui").as_posix()
     return f"""
     QMainWindow, QDialog {{
         background: {t['bg_gradient']};
@@ -266,7 +242,8 @@ def build_stylesheet(dark: bool = True) -> str:
     }}
     QWidget {{
         color: {t['text']};
-        font-size: 13px;
+        font-size: 14px;
+        font-weight: 400;
         selection-background-color: {t['primary']};
         selection-color: {t['on_primary']};
     }}
@@ -381,17 +358,18 @@ def build_stylesheet(dark: bool = True) -> str:
         font-weight: 800;
     }}
     QLabel[textRole="brand"] {{ color: {t['text']}; font-size: 19px; font-weight: 700; }}
-    QLabel[textRole="eyebrow"] {{ color: {t['cyan']}; font-size: 11px; font-weight: 700; }}
-    QLabel[textRole="navCaption"] {{ color: {t['subtle']}; font-size: 11px; font-weight: 700; }}
-    QLabel[textRole="pageTitle"] {{ color: {t['text']}; font-size: 25px; font-weight: 700; }}
-    QLabel[textRole="sectionTitle"] {{ color: {t['text']}; font-size: 16px; font-weight: 700; }}
-    QLabel[textRole="metric"] {{ color: {t['text']}; font-size: 22px; font-weight: 700; }}
-    QLabel[textRole="heroTitle"] {{ color: {t['text']}; font-size: 30px; font-weight: 700; }}
-    QLabel[textRole="body"] {{ color: {t['muted']}; font-size: 13px; }}
+    QLabel[textRole="eyebrow"] {{ color: {t['muted']}; font-size: 12px; font-weight: 600; }}
+    QLabel[textRole="navCaption"] {{ color: {t['subtle']}; font-size: 12px; font-weight: 700; }}
+    QLabel[textRole="pageTitle"] {{ color: {t['text']}; font-size: 36px; font-weight: 600; }}
+    QLabel[textRole="sectionTitle"] {{ color: {t['text']}; font-size: 20px; font-weight: 600; }}
+    QLabel[textRole="metric"] {{ color: {t['text']}; font-size: 24px; font-weight: 700; }}
+    QLabel[textRole="heroTitle"] {{ color: {t['text']}; font-size: 54px; font-weight: 600; }}
+    QLabel[textRole="heroAccent"] {{ color: {t['primary']}; font-size: 54px; font-weight: 600; }}
+    QLabel[textRole="body"] {{ color: {t['muted']}; font-size: 14px; }}
     QLabel[textRole="bodyStrong"] {{ color: {t['text']}; font-size: 13px; font-weight: 700; }}
-    QLabel[textRole="fieldLabel"] {{ color: {t['muted']}; font-size: 12px; font-weight: 650; }}
-    QLabel[textRole="stepNumber"] {{ color: {t['cyan']}; font-size: 11px; font-weight: 800; }}
-    QLabel[textRole="caption"] {{ color: {t['subtle']}; font-size: 11px; font-weight: 600; }}
+    QLabel[textRole="fieldLabel"] {{ color: {t['text']}; font-size: 13px; font-weight: 600; }}
+    QLabel[textRole="stepNumber"] {{ color: {t['cyan']}; font-size: 12px; font-weight: 800; }}
+    QLabel[textRole="caption"] {{ color: {t['subtle']}; font-size: 12px; font-weight: 600; }}
     QLabel[textRole="success"] {{ color: {t['success']}; font-weight: 700; }}
     QLabel[textRole="warning"] {{ color: {t['warning']}; font-weight: 700; }}
     QLabel[textRole="danger"] {{ color: {t['danger']}; font-weight: 700; }}
@@ -409,7 +387,7 @@ def build_stylesheet(dark: bool = True) -> str:
     QLabel[badge] {{
         border-radius: 10px;
         padding: 4px 10px;
-        font-size: 11px;
+        font-size: 12px;
         font-weight: 700;
     }}
     QLabel[badge="neutral"] {{ color: {t['muted']}; background: {t['glass_alt']}; border: 1px solid {t['hairline']}; }}
@@ -419,7 +397,7 @@ def build_stylesheet(dark: bool = True) -> str:
     QLabel[badge="danger"] {{ color: {t['danger']}; background: {t['danger_soft']}; border: 1px solid {t['danger']}; }}
 
     QPushButton, QToolButton {{
-        min-height: 36px;
+        min-height: 42px;
         padding: 0 14px;
         border-radius: 10px;
         background: {t['glass_alt']};
@@ -613,7 +591,75 @@ def build_stylesheet(dark: bool = True) -> str:
     QStatusBar {{ background: {t['glass']}; color: {t['muted']}; border-top: 1px solid {t['hairline']}; }}
     QStatusBar::item {{ border: 0; }}
     QToolTip {{ color: {t['text']}; background: {t['surface_alt']}; border: 1px solid {t['hairline_strong']}; padding: 7px; }}
+    QFrame#Navigation {{ background: {t['surface']}; border-bottom: 1px solid {t['border']}; }}
+    QPushButton[variant="navigation"] {{ background: transparent; border: 2px solid transparent; border-radius: 8px; color: {t['muted']}; }}
+    QPushButton[variant="navigation"]:checked {{ color: {t['text']}; background: {t['surface_alt']}; }}
+    QPushButton[variant="navigation"]:hover {{ color: {t['text']}; background: {t['surface_hover']}; }}
+    QPushButton[variant="navigation"]:focus {{ border-color: {t['focus']}; }}
+    QFrame[cardStyle="stat"] {{ background: transparent; border: 0; border-radius: 0; }}
+    QLabel[textRole="heroDescription"] {{ color: {t['muted']}; font-size: 17px; }}
+    QPushButton[variant="primary"] {{ border-radius: 21px; background: {t['primary']}; }}
+    QPushButton[variant="primary"]:hover {{ background: {t['primary_hover']}; }}
+    QPushButton[variant="primary"]:disabled {{ background: {t['surface_alt']}; color: {t['subtle']}; }}
+    QPushButton[variant="ghost"] {{ color: {t['primary']}; }}
     QMessageBox {{ background: {t['bg_gradient']}; }}
+
+    /* Quiet surfaces. Hierarchy comes from type and space, not nested borders. */
+    QFrame[card="true"], QFrame[card="true"][elevated="true"],
+    QFrame[glass="panel"], QFrame[glass="strong"] {{
+        background: {t['surface']}; border: 1px solid transparent; border-radius: 20px;
+    }}
+    QFrame[surface="soft"], QFrame[glass="subtle"] {{
+        background: {t['surface_alt']}; border: 0; border-radius: 12px;
+    }}
+    QFrame[cardStyle="stat"], QFrame[cardStyle="step"] {{
+        background: transparent; border: 0; border-radius: 0;
+    }}
+    QFrame[cardStyle="metric"] {{ background: {t['surface']}; border: 0; }}
+    QFrame#Navigation {{ background: {t['surface']}; border: 0; border-bottom: 1px solid {t['border']}; }}
+    QPushButton[variant="navigation"] {{ min-height: 40px; padding: 0 18px; font-weight: 500; }}
+    QPushButton[variant="navigation"]:checked {{ color: {t['cyan']}; background: {t['primary_soft']}; }}
+    QFrame#HomeHero {{ background: transparent; border: 0; }}
+    QFrame#HomeStats {{ background: transparent; border: 0; border-top: 1px solid {t['border']}; border-bottom: 1px solid {t['border']}; }}
+    QFrame#Workflow {{ background: {t['surface']}; border: 0; border-radius: 20px; }}
+    QFrame#DisclosureCard {{ background: transparent; border: 0; border-top: 1px solid {t['border']}; border-radius: 0; }}
+    QFrame#DisclosureCard QLabel[textRole="sectionTitle"] {{ font-size: 14px; }}
+    QFrame#PageHeader {{ background: transparent; }}
+    QFrame#SafetyStrip, QFrame#SafetyStrip[tone="warning"] {{ background: transparent; border: 0; border-radius: 0; }}
+    QFrame#ActionBar {{ background: {t['surface']}; border: 0; border-radius: 16px; }}
+    QFrame#ReplaceWarning {{ background: {t['surface_alt']}; border: 0; border-radius: 12px; }}
+    QLabel[badge] {{ border: 0; border-radius: 10px; padding: 5px 10px; font-weight: 500; }}
+    QLabel[badge="primary"] {{ color: {t['cyan']}; }}
+    QLabel#CandidateSummary {{ background: {t['surface_alt']}; border: 0; padding: 14px; }}
+    QPushButton, QToolButton {{ min-height: 42px; border: 2px solid transparent; padding: 0 16px; font-weight: 500; }}
+    QPushButton:focus, QToolButton:focus {{ border: 2px solid {t['focus']}; }}
+    QPushButton[variant="primary"] {{ border: 2px solid transparent; }}
+    QPushButton[variant="primary"]:focus {{ border: 2px solid {t['text']}; }}
+    QPushButton[variant="ghost"] {{ color: {t['cyan']}; }}
+    QPushButton[variant="quiet"] {{ border: 1px solid {t['border']}; }}
+    QPushButton[variant="quiet"]:focus {{ border: 2px solid {t['focus']}; }}
+    QLineEdit, QSpinBox, QDoubleSpinBox, QComboBox {{
+        min-height: 28px; border: 1px solid {t['border_strong']}; background: {t['surface']};
+        padding: 7px 12px; border-radius: 10px;
+    }}
+    QLineEdit:focus, QSpinBox:focus, QDoubleSpinBox:focus, QComboBox:focus {{ border: 2px solid {t['focus']}; padding: 6px 11px; }}
+    QComboBox::drop-down {{ border: 0; width: 28px; }}
+    QComboBox::down-arrow {{ image: url("{icons}/chevron-down.svg"); width: 16px; height: 16px; }}
+    QAbstractSpinBox {{ padding-right: 28px; }}
+    QSpinBox::up-button, QDoubleSpinBox::up-button {{ subcontrol-origin: border; subcontrol-position: top right; width: 26px; border: 0; background: transparent; }}
+    QSpinBox::down-button, QDoubleSpinBox::down-button {{ subcontrol-origin: border; subcontrol-position: bottom right; width: 26px; border: 0; background: transparent; }}
+    QSpinBox::up-arrow, QDoubleSpinBox::up-arrow {{ image: url("{icons}/chevron-up.svg"); width: 14px; height: 14px; }}
+    QSpinBox::down-arrow, QDoubleSpinBox::down-arrow {{ image: url("{icons}/chevron-down.svg"); width: 14px; height: 14px; }}
+    QCheckBox {{ spacing: 10px; min-height: 30px; }}
+    QCheckBox::indicator {{ width: 18px; height: 18px; border: 1px solid {t['border_strong']}; border-radius: 5px; background: {t['surface']}; }}
+    QCheckBox::indicator:checked {{ image: url("{icons}/check.svg"); background: {t['primary']}; border: 1px solid {t['primary']}; }}
+    QCheckBox::indicator:focus {{ border: 2px solid {t['focus']}; }}
+    QTableWidget, QTableView, QListView {{ border: 0; background: {t['surface']}; alternate-background-color: {t['surface_alt']}; }}
+    QHeaderView::section {{ background: {t['surface_alt']}; color: {t['muted']}; border: 0; padding: 14px 10px; font-weight: 500; }}
+    QMenu {{ background: {t['surface']}; color: {t['text']}; border: 1px solid {t['border']}; padding: 6px; }}
+    QMenu::item {{ padding: 10px 24px; border-radius: 6px; }}
+    QMenu::item:selected {{ background: {t['primary_soft']}; color: {t['cyan']}; }}
+    QMenu::separator {{ background: {t['border']}; height: 1px; margin: 6px; }}
     """
 
 

@@ -25,7 +25,7 @@ Set-Location 'E:\SentinelVision_Workspace'
 - 日常总入口：`START_HERE.cmd`。它先运行环境自检，再打开图形化工作台。
 - 工作库自带 Windows x64 Python 3.11.9、PyTorch 2.2.1+cu118、PySide6、完整训练依赖、离线修复包、便携 Git 和 GitHub CLI。
 - 已在 RTX 4080 Laptop 上通过 CUDA、自检、模型加载和多模型切换测试；目标公共电脑 RTX 4090 只需安装兼容 CUDA 11.8 的 NVIDIA 驱动，不需要另装 Python 或 CUDA Toolkit。
-- UI 已重做为现代深色工作台，包含“开始”“训练新模型”“审核与部署”“已部署模型”四页。原 SENTINEL 的已有视频、摄像头、告警、截图和检测功能均保留。
+- UI 已按用户指定的 UI UX Pro Max 技能重做为浅色、简洁排版的原生工作台，包含“开始”“训练模型”“审核与部署”“模型库”四页。训练高级参数按需展开，类别审核使用摘要与独立编辑区。检测台保留明暗主题，突出视频画面，区域工具按需展开。原有视频、摄像头、告警、截图和检测功能均保留。设计规则和验证入口见 `design-system/sentinelvision/MASTER.md`。
 - 检测台已加入可回退的“生产时序防护”：`hat/person` 冲突消解、高低置信双阈值、连续高置信命中/持续时间/EMA 公开 Track ID 门禁、受限 Alpha-Beta 运动预测重捕获、N-of-M/EMA/滞回、每 Track 风险状态机、Event ID 与结构化证据日志。未发布短噪声不显示识别框也不消耗公开编号；缺失框和预测框不构成告警证据。Fire 等非 PPE 告警类已接入通用按 Track 时序门禁，专用 FireTemporalVerifier 仍属后续阶段。
 - 训练和检测代码均使用相对路径；交接前使用 Git 跟踪文件搜索确认，没有 `D:\python`、`D:/python` 或其他 D 盘路径硬编码。
 

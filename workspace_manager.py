@@ -27,56 +27,35 @@ from project_paths import (
     TRAINING_OUTPUTS_DIR,
 )
 from ui_font import install_ui_font
+from ui_artwork import VisionArtwork
 from ui_theme import (
     PressableButton,
     build_stylesheet,
     make_badge,
     make_card,
     set_property,
+    reduce_motion_enabled,
+    tokens,
 )
 
 
 PYTHON_EXECUTABLE = str(RUNTIME_PYTHON)
 
 
-class AuroraBackdrop(QtWidgets.QWidget):
-    """Static, low-cost light field behind the translucent workspace surfaces."""
-
-    def paintEvent(self, event):
-        painter = QtGui.QPainter(self)
-        painter.setRenderHint(QtGui.QPainter.RenderHint.Antialiasing)
-        painter.fillRect(self.rect(), QtGui.QColor("#050A12"))
-
-        width = max(1, self.width())
-        height = max(1, self.height())
-        lights = (
-            (QtCore.QPointF(width * 0.18, height * 0.06), max(width, height) * 0.58, QtGui.QColor(68, 112, 255, 78)),
-            (QtCore.QPointF(width * 0.92, height * 0.24), max(width, height) * 0.48, QtGui.QColor(39, 197, 214, 52)),
-            (QtCore.QPointF(width * 0.70, height * 1.02), max(width, height) * 0.52, QtGui.QColor(111, 73, 255, 44)),
-        )
-        for center, radius, color in lights:
-            gradient = QtGui.QRadialGradient(center, radius)
-            gradient.setColorAt(0.0, color)
-            color.setAlpha(0)
-            gradient.setColorAt(1.0, color)
-            painter.fillRect(self.rect(), gradient)
-        painter.end()
-        super().paintEvent(event)
-
-
 class DisclosureCard(QtWidgets.QFrame):
-    """Compact glass section with an immediate, keyboard-friendly reveal."""
+    """A quiet, keyboard-accessible disclosure with a stable hit target."""
 
     def __init__(self, title, detail, expanded=False, parent=None):
         super().__init__(parent)
         self.setAttribute(QtCore.Qt.WidgetAttribute.WA_StyledBackground, True)
         self.setProperty("card", True)
         self.setProperty("glass", "panel")
+        self.setObjectName("DisclosureCard")
         self._title = title
         self._expanded = bool(expanded)
 
         outer = QtWidgets.QVBoxLayout(self)
-        outer.setContentsMargins(16, 14, 16, 14)
+        outer.setContentsMargins(0, 14, 0, 14)
         outer.setSpacing(10)
         header = QtWidgets.QHBoxLayout()
         header.setSpacing(12)
@@ -119,16 +98,16 @@ class DisclosureCard(QtWidgets.QFrame):
 
 class WorkspaceManager(QtWidgets.QMainWindow):
     PAGE_META = (
-        ("概览", "掌握当前状态，只处理下一步"),
-        ("训练", "使用安全默认值创建候选模型"),
-        ("审核与部署", "人工确认后，候选模型才能进入生产区"),
-        ("生产模型", "查看 RESULTS 中已批准的正式模型"),
+        ("开始", "视觉安全工作区"),
+        ("训练下一版模型。", "选择数据与基础模型，创建一个新的训练候选。"),
+        ("每次部署，都有依据。", "核对表现、确认类别，再由你批准投入使用。"),
+        ("你的模型，井然有序。", "集中查看已批准的版本，在检测台按需启用。"),
     )
 
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("SentinelVision · Liquid Glass AI 工作台")
-        self.resize(1400, 900)
+        self.setWindowTitle("SentinelVision · 视觉安全工作台")
+        self.resize(1440, 900)
         self.setMinimumSize(960, 640)
         self.training_process = None
         self.utility_process = None
@@ -137,197 +116,111 @@ class WorkspaceManager(QtWidgets.QMainWindow):
         self._last_recommended_image_size = 640
 
         self._build_shell()
-        self.statusBar().showMessage("工作库：%s" % PROJECT_ROOT)
+        self.statusBar().hide()
         self._apply_style()
         self._refresh_datasets()
         self._refresh_candidates()
         self._refresh_models()
 
     def _build_shell(self):
-        shell = AuroraBackdrop()
+        shell = QtWidgets.QWidget()
         shell.setObjectName("AppShell")
-        shell_layout = QtWidgets.QHBoxLayout(shell)
-        shell_layout.setContentsMargins(14, 14, 14, 12)
-        shell_layout.setSpacing(14)
-
-        sidebar = QtWidgets.QFrame()
-        sidebar.setObjectName("SideNav")
-        sidebar.setProperty("glass", "strong")
-        sidebar.setFixedWidth(228)
-        self.sidebar = sidebar
-        nav_layout = QtWidgets.QVBoxLayout(sidebar)
-        nav_layout.setContentsMargins(17, 19, 17, 16)
-        nav_layout.setSpacing(7)
-
-        brand_row = QtWidgets.QHBoxLayout()
-        logo = QtWidgets.QLabel("SV")
-        logo.setObjectName("BrandMark")
-        logo.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
-        logo.setFixedSize(42, 42)
-        brand_text = QtWidgets.QVBoxLayout()
-        brand_text.setSpacing(1)
+        outer = QtWidgets.QVBoxLayout(shell)
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.setSpacing(0)
+        self.navigation = QtWidgets.QFrame()
+        self.navigation.setObjectName("Navigation")
+        nav = QtWidgets.QHBoxLayout(self.navigation)
+        nav.setContentsMargins(32, 12, 32, 12)
         brand = QtWidgets.QLabel("SentinelVision")
         brand.setProperty("textRole", "brand")
-        edition = QtWidgets.QLabel("AI SAFETY WORKSPACE")
-        edition.setProperty("textRole", "eyebrow")
-        self.brand_label = brand
-        self.edition_label = edition
-        brand_text.addWidget(brand)
-        brand_text.addWidget(edition)
-        brand_row.addWidget(logo)
-        brand_row.addLayout(brand_text, 1)
-        nav_layout.addLayout(brand_row)
-        nav_layout.addSpacing(23)
-
-        nav_caption = QtWidgets.QLabel("工作区")
-        nav_caption.setProperty("textRole", "navCaption")
-        self.nav_caption = nav_caption
-        nav_layout.addWidget(nav_caption)
-        nav_layout.addSpacing(3)
-
+        brand.setMinimumWidth(200)
+        nav.addWidget(brand)
+        nav.addStretch()
         self.nav_group = QtWidgets.QButtonGroup(self)
         self.nav_group.setExclusive(True)
         self.nav_buttons = []
-        self.nav_item_labels = []
-        nav_items = (
-            ("01", "概览", "运行状态与下一步"),
-            ("02", "训练", "创建候选模型"),
-            ("03", "审核与部署", "人工生产门禁"),
-            ("04", "生产模型", "正式模型目录"),
-        )
-        for index, (number, text, hint) in enumerate(nav_items):
-            button = QtWidgets.QPushButton("%s    %s" % (number, text))
+        for index, name in enumerate(("开始", "训练模型", "审核与部署", "模型库")):
+            button = self._button(name, lambda checked=False, i=index: self._show_page(i), variant="navigation")
             button.setCheckable(True)
-            button.setProperty("variant", "nav")
-            button.setToolTip(hint)
-            button.setAccessibleName(text)
+            button.setAccessibleName(name)
             self.nav_group.addButton(button, index)
             self.nav_buttons.append(button)
-            self.nav_item_labels.append((number, text))
-            nav_layout.addWidget(button)
-        nav_layout.addStretch(1)
-
-        local_caption = QtWidgets.QLabel("运行环境")
-        local_caption.setProperty("textRole", "navCaption")
-        self.local_caption = local_caption
-        nav_layout.addWidget(local_caption)
-        offline = make_badge("●  本地安全运行", "success")
-        offline.setToolTip("运行环境、缓存和训练输出全部保存在本地移动工作库中")
-        self.sidebar_offline_badge = offline
-        nav_layout.addWidget(offline)
-        location = QtWidgets.QLabel(PROJECT_ROOT.name)
-        location.setProperty("textRole", "muted")
-        location.setWordWrap(True)
-        location.setToolTip(str(PROJECT_ROOT))
-        self.sidebar_location = location
-        nav_layout.addWidget(location)
-
-        content = QtWidgets.QFrame()
-        content.setObjectName("ContentShell")
-        content.setProperty("glass", "strong")
-        content_layout = QtWidgets.QVBoxLayout(content)
-        content_layout.setContentsMargins(0, 0, 0, 0)
-        content_layout.setSpacing(0)
-        top_bar = QtWidgets.QFrame()
-        top_bar.setObjectName("TopBar")
-        top_layout = QtWidgets.QHBoxLayout(top_bar)
-        top_layout.setContentsMargins(25, 16, 25, 15)
-        page_text = QtWidgets.QVBoxLayout()
-        page_text.setSpacing(3)
+            nav.addWidget(button)
+        nav.addStretch()
+        self.header_device_badge = make_badge("本地运行", "neutral")
+        nav.addWidget(self.header_device_badge)
+        outer.addWidget(self.navigation)
+        self.page_header = QtWidgets.QFrame()
+        self.page_header.setObjectName("PageHeader")
+        heading = QtWidgets.QVBoxLayout(self.page_header)
+        heading.setContentsMargins(40, 32, 40, 4)
+        self.heading_layout = heading
+        heading.setSpacing(6)
         self.page_eyebrow = QtWidgets.QLabel()
         self.page_eyebrow.setProperty("textRole", "eyebrow")
         self.page_title = QtWidgets.QLabel()
         self.page_title.setProperty("textRole", "pageTitle")
+        self.page_title.setWordWrap(True)
         self.page_subtitle = QtWidgets.QLabel()
-        self.page_subtitle.setProperty("textRole", "muted")
-        page_text.addWidget(self.page_eyebrow)
-        page_text.addWidget(self.page_title)
-        page_text.addWidget(self.page_subtitle)
-        top_layout.addLayout(page_text)
-        top_layout.addStretch(1)
-        gpu_ready = torch.cuda.is_available()
-        gpu_name = torch.cuda.get_device_name(0) if gpu_ready else "CUDA 不可用"
-        gpu_text = (
-            gpu_name.replace("NVIDIA GeForce ", "")
-            .replace("NVIDIA ", "")
-            .replace(" Laptop GPU", "")
-        )
-        offline_badge = make_badge("OFFLINE", "neutral")
-        offline_badge.setToolTip("工作库以本地离线模式运行")
-        self.header_device_badge = make_badge("GPU · %s" % gpu_text, "success" if gpu_ready else "warning")
-        self.header_device_badge.setToolTip(gpu_name)
-        top_layout.addWidget(offline_badge)
-        top_layout.addWidget(self.header_device_badge)
-
+        self.page_subtitle.setProperty("textRole", "body")
+        self.page_subtitle.setWordWrap(True)
+        for label in (self.page_eyebrow, self.page_title, self.page_subtitle):
+            heading.addWidget(label)
+        outer.addWidget(self.page_header)
         self.pages = QtWidgets.QStackedWidget()
-        self.pages.addWidget(self._build_home_tab())
-        self.pages.addWidget(self._build_training_tab())
-        self.pages.addWidget(self._build_deployment_tab())
-        self.pages.addWidget(self._build_models_tab())
-        content_layout.addWidget(top_bar)
-        content_layout.addWidget(self.pages, 1)
-
-        shell_layout.addWidget(sidebar)
-        shell_layout.addWidget(content, 1)
+        for build in (self._build_home_tab, self._build_training_tab, self._build_deployment_tab, self._build_models_tab):
+            self.pages.addWidget(build())
+        outer.addWidget(self.pages, 1)
         self.setCentralWidget(shell)
-        self.nav_group.idClicked.connect(self._show_page)
-        self.nav_buttons[0].setChecked(True)
+        self._page_effect = QtWidgets.QGraphicsOpacityEffect(self.pages)
+        self.pages.setGraphicsEffect(self._page_effect)
+        self._page_animation = QtCore.QPropertyAnimation(self._page_effect, b"opacity", self)
+        self._page_animation.setDuration(160)
+        self._page_animation.setEasingCurve(QtCore.QEasingCurve.Type.OutCubic)
         self._show_page(0)
         QtCore.QTimer.singleShot(0, self._apply_responsive_layout)
 
     def _show_page(self, index):
         if not 0 <= index < len(self.PAGE_META):
             return
+        changed = self.pages.currentIndex() != index
+        self._page_animation.stop()
         self.pages.setCurrentIndex(index)
+        self.nav_buttons[index].setChecked(True)
+        if changed:
+            self.nav_buttons[index].setFocus(QtCore.Qt.FocusReason.OtherFocusReason)
         title, subtitle = self.PAGE_META[index]
-        self.page_eyebrow.setText("WORKSPACE  /  %02d" % (index + 1))
+        self.page_eyebrow.setText(("WORKSPACE", "MODEL STUDIO  /  01", "MODEL STUDIO  /  02", "MODEL LIBRARY  /  03")[index])
         self.page_title.setText(title)
         self.page_subtitle.setText(subtitle)
+        self.page_header.setVisible(index != 0)
+        if changed and not reduce_motion_enabled() and self.isVisible():
+            self._page_animation.setStartValue(0.9)
+            self._page_animation.setEndValue(1.0)
+            self._page_animation.start()
+        else:
+            self._page_effect.setOpacity(1.0)
 
     def _apply_responsive_layout(self):
-        if not hasattr(self, "sidebar"):
+        if not hasattr(self, "models_summary_layout"):
             return
         compact = self.width() < 1100
-        stacked = self.width() < 1180
-        if getattr(self, "_compact", None) != compact:
-            self._compact = compact
-            self.sidebar.setFixedWidth(78 if compact else 228)
-            self.brand_label.setVisible(not compact)
-            self.edition_label.setVisible(not compact)
-            self.nav_caption.setVisible(not compact)
-            self.local_caption.setVisible(not compact)
-            self.sidebar_location.setVisible(not compact)
-            self.sidebar_offline_badge.setText("●" if compact else "●  本地安全运行")
-            self.sidebar_offline_badge.setAlignment(
-                QtCore.Qt.AlignmentFlag.AlignCenter
-                if compact else QtCore.Qt.AlignmentFlag.AlignLeft
-            )
-            for button, (number, label) in zip(self.nav_buttons, self.nav_item_labels):
-                button.setText(label[:2] if compact else "%s    %s" % (number, label))
-                set_property(button, "compact", compact)
-            self.models_summary_layout.setDirection(
-                QtWidgets.QBoxLayout.Direction.TopToBottom
-                if compact else QtWidgets.QBoxLayout.Direction.LeftToRight
-            )
-            if hasattr(self, "models_table"):
-                self.models_table.setColumnHidden(4, compact)
-
-        if getattr(self, "_stacked_pages", None) != stacked:
-            self._stacked_pages = stacked
-            direction = (
-                QtWidgets.QBoxLayout.Direction.TopToBottom
-                if stacked else QtWidgets.QBoxLayout.Direction.LeftToRight
-            )
-            self.home_lower_layout.setDirection(direction)
-            self.training_columns_layout.setDirection(direction)
-            self.review_columns_layout.setDirection(direction)
-            for column in range(4):
-                self.home_metrics_layout.setColumnStretch(
-                    column, 1 if not stacked or column < 2 else 0
-                )
-            for index, card in enumerate(self.home_metric_cards):
-                row, column = (divmod(index, 2) if stacked else (0, index))
-                self.home_metrics_layout.addWidget(card, row, column)
+        stacked = self.width() < 1200
+        margin = max(28, (self.width() - 1180) // 2)
+        self.heading_layout.setContentsMargins(margin, 30, margin, 4)
+        for i in range(self.pages.count()):
+            self.pages.widget(i).widget().layout().setContentsMargins(margin, 24, margin, 28)
+        self.header_device_badge.setVisible(not compact)
+        self.home_artwork.setVisible(not compact)
+        self.models_table.setColumnHidden(4, compact)
+        direction = QtWidgets.QBoxLayout.Direction
+        self.models_summary_layout.setDirection(direction.TopToBottom if compact else direction.LeftToRight)
+        self.training_columns_layout.setDirection(direction.TopToBottom if stacked else direction.LeftToRight)
+        self.review_columns_layout.setDirection(direction.TopToBottom if stacked else direction.LeftToRight)
+        self.home_lower_layout.setDirection(direction.LeftToRight)
+        for index in range(len(self.home_metric_cards)):
+            self.home_metrics_layout.setColumnStretch(index, 1)
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
@@ -335,7 +228,7 @@ class WorkspaceManager(QtWidgets.QMainWindow):
 
     def _apply_style(self):
         QtWidgets.QApplication.setStyle("Fusion")
-        self.setStyleSheet(build_stylesheet(dark=True))
+        self.setStyleSheet(build_stylesheet(dark=False))
 
     @staticmethod
     def _page():
@@ -345,8 +238,8 @@ class WorkspaceManager(QtWidgets.QMainWindow):
         outer = QtWidgets.QWidget()
         outer.setObjectName("PageContent")
         layout = QtWidgets.QVBoxLayout(outer)
-        layout.setContentsMargins(24, 20, 24, 24)
-        layout.setSpacing(14)
+        layout.setContentsMargins(40, 24, 40, 32)
+        layout.setSpacing(24)
         scroll.setWidget(outer)
         return scroll, layout
 
@@ -385,7 +278,7 @@ class WorkspaceManager(QtWidgets.QMainWindow):
     def _glass_card(cls, title=None, detail=None, elevated=False, badge=None):
         card = make_card(elevated=elevated)
         layout = QtWidgets.QVBoxLayout(card)
-        layout.setContentsMargins(18, 17, 18, 18)
+        layout.setContentsMargins(24, 24, 24, 24)
         layout.setSpacing(13)
         if title:
             layout.addWidget(cls._section_header(title, detail, badge))
@@ -466,225 +359,188 @@ class WorkspaceManager(QtWidgets.QMainWindow):
 
     def _build_home_tab(self):
         page, layout = self._page()
-        hero = make_card(elevated=True)
-        hero.setObjectName("HeroCard")
-        hero.setProperty("cardStyle", "hero")
+        layout.setSpacing(24)
+        hero = QtWidgets.QFrame()
+        hero.setObjectName("HomeHero")
         hero_layout = QtWidgets.QHBoxLayout(hero)
-        hero_layout.setContentsMargins(26, 24, 24, 24)
-        hero_layout.setSpacing(24)
-        hero_copy = QtWidgets.QVBoxLayout()
-        hero_copy.setSpacing(7)
-        eyebrow = QtWidgets.QLabel("LOCAL AI SAFETY · READY")
-        eyebrow.setProperty("textRole", "eyebrow")
-        headline = QtWidgets.QLabel("今天需要处理什么？")
-        headline.setProperty("textRole", "heroTitle")
-        description = QtWidgets.QLabel("启动实时检测，或从训练开始构建下一版生产模型。所有数据留在本机。")
-        description.setProperty("textRole", "muted")
+        hero_layout.setContentsMargins(0, 18, 0, 12)
+        hero_layout.setSpacing(40)
+        copy = QtWidgets.QVBoxLayout()
+        copy.setSpacing(8)
+        for text, role in (("SENTINELVISION  /  视觉安全", "eyebrow"),
+                           ("每一帧，", "heroTitle"), ("看得更清楚。", "heroAccent")):
+            label = QtWidgets.QLabel(text)
+            label.setProperty("textRole", role)
+            copy.addWidget(label)
+        description = QtWidgets.QLabel("实时检测与模型迭代，在这里开始。")
+        description.setProperty("textRole", "heroDescription")
         description.setWordWrap(True)
-        hero_copy.addWidget(eyebrow)
-        hero_copy.addWidget(headline)
-        hero_copy.addWidget(description)
-        hero_layout.addLayout(hero_copy, 1)
-        hero_actions = QtWidgets.QVBoxLayout()
-        hero_actions.setSpacing(8)
-        launch = self._button("启动实时检测", self._start_sentinel, primary=True)
+        copy.addSpacing(8)
+        copy.addWidget(description)
+        actions = QtWidgets.QHBoxLayout()
+        actions.setSpacing(8)
+        launch = self._button("开始检测", self._start_sentinel, primary=True)
         launch.setAccessibleName("启动实时检测")
-        launch.setMinimumWidth(178)
-        launch.setMinimumHeight(42)
-        environment = self._button("检查运行环境", lambda: self._run_utility("portable_check.py"))
-        environment.setAccessibleName("检查运行环境")
-        hero_actions.addWidget(launch)
-        hero_actions.addWidget(environment)
-        hero_layout.addLayout(hero_actions)
+        launch.setMinimumWidth(164)
+        actions.addWidget(launch)
+        actions.addWidget(self._button("训练新模型  →", lambda: self._show_page(1), variant="ghost"))
+        actions.addStretch()
+        copy.addSpacing(16)
+        copy.addLayout(actions)
+        hero_layout.addLayout(copy, 3)
+        self.home_artwork = VisionArtwork()
+        hero_layout.addWidget(self.home_artwork, 2)
         layout.addWidget(hero)
 
-        deployed_count = len(list(RESULTS_DIR.glob("**/weights/best.pt")))
-        candidate_count = len(list(TRAINING_OUTPUTS_DIR.glob("**/weights/best.pt")))
-        gpu_value = torch.cuda.get_device_name(0) if torch.cuda.is_available() else "未检测到 CUDA"
-        metrics = QtWidgets.QGridLayout()
-        metrics.setHorizontalSpacing(10)
-        metrics.setVerticalSpacing(10)
-        gpu_short = (
-            gpu_value.replace("NVIDIA GeForce ", "")
-            .replace("NVIDIA ", "")
-            .replace(" Laptop GPU", "")
-        )
-        gpu_card, self.home_gpu = self._metric_card("计算设备", gpu_short, "CUDA 加速" if torch.cuda.is_available() else "需要检查环境", "success" if torch.cuda.is_available() else "warning")
-        model_card, self.home_model_metric = self._metric_card("生产模型", str(deployed_count), "已人工批准", "primary")
-        candidate_card, self.home_candidate_metric = self._metric_card("待审候选", str(candidate_count), "不会自动部署", "warning" if candidate_count else "neutral")
-        runtime_card, self.home_runtime_metric = self._metric_card("运行方式", "本地离线", "便携运行时", "success")
-        for index, card in enumerate((gpu_card, model_card, candidate_card, runtime_card)):
-            card.setMinimumWidth(130)
-            metrics.addWidget(card, 0, index)
-            metrics.setColumnStretch(index, 1)
-        self.home_metrics_layout = metrics
-        self.home_metric_cards = (gpu_card, model_card, candidate_card, runtime_card)
-        layout.addLayout(metrics)
+        stats = QtWidgets.QFrame()
+        stats.setObjectName("HomeStats")
+        self.home_metrics_layout = QtWidgets.QGridLayout(stats)
+        self.home_metrics_layout.setContentsMargins(0, 12, 0, 12)
+        self.home_metrics_layout.setSpacing(24)
+        gpu_ready = torch.cuda.is_available()
+        gpu = torch.cuda.get_device_name(0).replace("NVIDIA GeForce ", "").replace(" Laptop GPU", "") if gpu_ready else "CPU 模式"
+        self.home_metric_cards = []
+        for label, value, detail, attr in (
+            ("计算设备", gpu, "本机计算 · CUDA 可用" if gpu_ready else "训练前请检查 GPU 环境", "home_gpu"),
+            ("生产模型", "—", "已批准，可按需启用", "home_model_metric"),
+            ("训练候选", "—", "等待你的审核", "home_candidate_metric"),
+        ):
+            card, metric = self._metric_card(label, value, detail)
+            card.setProperty("cardStyle", "stat")
+            card.layout().setContentsMargins(0, 6, 0, 6)
+            setattr(self, attr, metric)
+            index = len(self.home_metric_cards)
+            self.home_metrics_layout.addWidget(card, 0, index)
+            self.home_metric_cards.append(card)
+        layout.addWidget(stats)
 
-        lower = QtWidgets.QHBoxLayout()
-        lower.setSpacing(12)
-        workflow, workflow_layout = self._glass_card(
-            "模型发布路径",
-            "每一步都有明确边界，候选权重不会自行进入生产区。",
-            elevated=True,
-            badge=make_badge("人工门禁", "primary"),
-        )
-        workflow_steps = (
-            ("01", "训练", "生成候选权重", "进入训练", lambda: self._show_page(1)),
-            ("02", "审核", "核对指标与真实媒体", "进入审核", lambda: self._show_page(2)),
-            ("03", "部署", "批准后复制到 RESULTS", "查看模型", lambda: self._show_page(3)),
-        )
-        for index, (number, title, detail, action_text, callback) in enumerate(workflow_steps):
-            row = QtWidgets.QFrame()
-            row.setProperty("surface", "soft")
-            row_layout = QtWidgets.QHBoxLayout(row)
-            row_layout.setContentsMargins(13, 10, 10, 10)
-            row_layout.setSpacing(11)
-            step = QtWidgets.QLabel(number)
-            step.setProperty("textRole", "stepNumber")
-            step.setFixedWidth(28)
-            copy = QtWidgets.QVBoxLayout()
-            copy.setSpacing(1)
-            title_label = QtWidgets.QLabel(title)
-            title_label.setProperty("textRole", "bodyStrong")
+        workflow = QtWidgets.QFrame()
+        workflow.setObjectName("Workflow")
+        workflow_layout = QtWidgets.QVBoxLayout(workflow)
+        workflow_layout.setContentsMargins(26, 22, 26, 18)
+        workflow_layout.setSpacing(18)
+        workflow_layout.addWidget(self._section_header("从一次训练，到一个可靠版本。"))
+        self.home_lower_layout = QtWidgets.QHBoxLayout()
+        self.home_lower_layout.setSpacing(28)
+        for number, title, detail, action, target in (
+            ("01", "训练", "从你的数据，训练新的候选。", "创建训练  →", 1),
+            ("02", "审核与部署", "验证真实表现，人工确认上线。", "审查候选  →", 2),
+            ("03", "模型库", "查看正式版本，按需启用。", "浏览模型  →", 3),
+        ):
+            card, body = self._glass_card()
+            card.setProperty("cardStyle", "step")
+            body.setContentsMargins(0, 0, 0, 0)
+            body.setSpacing(8)
+            heading = QtWidgets.QLabel(number + "  /  " + title)
+            heading.setProperty("textRole", "bodyStrong")
             detail_label = QtWidgets.QLabel(detail)
-            detail_label.setProperty("textRole", "muted")
-            copy.addWidget(title_label)
-            copy.addWidget(detail_label)
-            action = self._button(action_text, callback, variant="ghost")
-            action.setMinimumWidth(86)
-            row_layout.addWidget(step)
-            row_layout.addLayout(copy, 1)
-            row_layout.addWidget(action)
-            workflow_layout.addWidget(row)
-            if index < len(workflow_steps) - 1:
-                connector = QtWidgets.QFrame()
-                connector.setObjectName("WorkflowConnector")
-                connector.setFixedHeight(1)
-                workflow_layout.addWidget(connector)
-        workflow_layout.addStretch(1)
+            detail_label.setProperty("textRole", "body")
+            detail_label.setWordWrap(True)
+            body.addWidget(heading)
+            body.addWidget(detail_label)
+            body.addWidget(self._button(action, lambda checked=False, i=target: self._show_page(i), variant="ghost"), 0, QtCore.Qt.AlignmentFlag.AlignLeft)
+            self.home_lower_layout.addWidget(card, 1)
+        workflow_layout.addLayout(self.home_lower_layout)
+        layout.addWidget(workflow)
 
-        tools = DisclosureCard("维护与帮助", "检查、文档与版本工具", expanded=False)
-        tools_layout = tools.body_layout
-        tool_actions = (
-            ("检查文件完整", lambda: self._run_utility("portable/verify_workspace.py")),
-            ("打开工作库", lambda: self._open_path(PROJECT_ROOT)),
+        footer = QtWidgets.QHBoxLayout()
+        local = QtWidgets.QLabel("本地工作区  ·  数据留在你的设备")
+        local.setProperty("textRole", "caption")
+        footer.addWidget(local)
+        footer.addStretch()
+        self.motion_check = QtWidgets.QCheckBox("减少动效")
+        self.motion_check.setChecked(reduce_motion_enabled())
+        self.motion_check.toggled.connect(self._toggle_motion)
+        footer.addWidget(self.motion_check)
+        tools = self._button("维护与帮助", lambda: None, variant="ghost")
+        menu = QtWidgets.QMenu(tools)
+        for text, callback in (
+            ("检查运行环境", lambda: self._run_utility("portable_check.py")),
+            ("检查关键文件", lambda: self._run_utility("portable/verify_workspace.py")),
             ("中文使用说明", lambda: self._open_path(PROJECT_ROOT / "START_HERE_CN.md")),
+            ("打开工作库", lambda: self._open_path(PROJECT_ROOT)),
             ("Git 使用说明", lambda: self._open_path(PROJECT_ROOT / "GIT_GUIDE_CN.md")),
             ("保存代码版本", lambda: self._launch_command_file("SAVE_VERSION.cmd")),
             ("同步 GitHub", lambda: self._launch_command_file("SYNC_GITHUB.cmd")),
             ("查看 Git 历史", lambda: self._launch_command_file("GIT_STATUS.cmd")),
-        )
-        for text, callback in tool_actions:
-            tools_layout.addWidget(self._button(text, callback, variant="quiet"))
-        lower.addWidget(workflow, 3)
-        lower.addWidget(tools, 2, QtCore.Qt.AlignmentFlag.AlignTop)
-        self.home_lower_layout = lower
-        layout.addLayout(lower)
-
-        self.home_log_disclosure = DisclosureCard(
-            "任务输出", "环境与文件检查的结果会显示在这里。", expanded=False
-        )
-        log_layout = self.home_log_disclosure.body_layout
+        ):
+            menu.addAction(text, callback)
+        tools.setMenu(menu)
+        footer.addWidget(tools)
+        layout.addLayout(footer)
+        self.home_log_disclosure = DisclosureCard("任务输出", "环境检查与维护结果")
         self.home_log = QtWidgets.QPlainTextEdit()
         self.home_log.setReadOnly(True)
-        self.home_log.setPlaceholderText("环境检查结果会显示在这里。")
-        self.home_log.setMinimumHeight(150)
+        self.home_log.setMinimumHeight(160)
         self.home_log.setMaximumHeight(230)
-        log_layout.addWidget(self.home_log)
+        self.home_log_disclosure.body_layout.addWidget(self.home_log)
         layout.addWidget(self.home_log_disclosure)
-        layout.addStretch(1)
+        layout.addStretch()
         return page
+
+    def _toggle_motion(self, reduced):
+        os.environ["SENTINEL_REDUCE_MOTION"] = "1" if reduced else "0"
+        if reduced:
+            self._page_animation.stop()
+            self._page_effect.setOpacity(1.0)
+            for button in self.findChildren(PressableButton):
+                button._press_animation.stop()
+                button.visualScale = 1.0
 
     def _build_training_tab(self):
         page, layout = self._page()
-        safety = QtWidgets.QFrame()
-        safety.setObjectName("SafetyStrip")
-        safety.setProperty("tone", "info")
-        safety_layout = QtWidgets.QHBoxLayout(safety)
-        safety_layout.setContentsMargins(14, 11, 14, 11)
-        safety_layout.setSpacing(10)
-        safety_layout.addWidget(make_badge("候选区", "primary"))
-        intro = QtWidgets.QLabel(
-            "训练结果只写入 TRAINING_OUTPUTS。数据集会先被审计，完成后仍需人工审核与批准。"
-        )
-        intro.setProperty("textRole", "body")
-        intro.setWordWrap(True)
-        safety_layout.addWidget(intro, 1)
-        layout.addWidget(safety)
-
         columns = QtWidgets.QHBoxLayout()
-        columns.setSpacing(12)
-        data_card, data_layout = self._glass_card(
-            "数据与基础模型",
-            "选择训练输入；工作台会验证路径与权重兼容性。",
-            elevated=True,
-            badge=make_badge("步骤 1", "neutral"),
-        )
+        columns.setSpacing(24)
+        data_card, data_layout = self._glass_card("选择训练输入", "01  /  数据与基础模型")
+        data_layout.setContentsMargins(28, 26, 28, 26)
+        data_layout.setSpacing(16)
         self.dataset_combo = QtWidgets.QComboBox()
         self.dataset_combo.setEditable(True)
-        self.dataset_combo.setMinimumWidth(0)
-        self.dataset_combo.setMinimumContentsLength(20)
-        self.dataset_combo.setSizeAdjustPolicy(
-            QtWidgets.QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon
-        )
+        self.dataset_combo.setMinimumContentsLength(16)
+        self.dataset_combo.setSizeAdjustPolicy(QtWidgets.QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon)
         self.dataset_combo.setAccessibleName("数据集 YAML")
         self.dataset_browse = self._button("浏览", self._browse_dataset, variant="quiet")
-        dataset_row = QtWidgets.QHBoxLayout()
-        dataset_row.setSpacing(8)
-        dataset_row.addWidget(self.dataset_combo, 1)
-        dataset_row.addWidget(self.dataset_browse)
-        dataset_label = QtWidgets.QLabel("数据集 YAML")
-        dataset_label.setProperty("textRole", "fieldLabel")
-        data_layout.addWidget(dataset_label)
-        data_layout.addLayout(dataset_row)
+        label = QtWidgets.QLabel("数据集")
+        label.setProperty("textRole", "fieldLabel")
+        label.setBuddy(self.dataset_combo)
+        data_layout.addWidget(label)
+        row = QtWidgets.QHBoxLayout()
+        row.setSpacing(8)
+        row.addWidget(self.dataset_combo, 1)
+        row.addWidget(self.dataset_browse)
+        data_layout.addLayout(row)
 
         self.weights_preset = QtWidgets.QComboBox()
-        self.weights_preset.setMinimumWidth(0)
-        self.weights_preset.setMinimumContentsLength(20)
-        self.weights_preset.setSizeAdjustPolicy(
-            QtWidgets.QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon
-        )
-        self.weights_preset.setToolTip("仅列出与当前目标检测训练流程兼容的官方 YOLOv5 v7.0 权重")
+        self.weights_preset.setMinimumContentsLength(16)
+        self.weights_preset.setSizeAdjustPolicy(QtWidgets.QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon)
         self.weights_preset.setAccessibleName("预训练权重型号")
-        preset_label = QtWidgets.QLabel("预训练型号")
-        preset_label.setProperty("textRole", "fieldLabel")
-        data_layout.addWidget(preset_label)
+        label = QtWidgets.QLabel("基础模型")
+        label.setProperty("textRole", "fieldLabel")
+        label.setBuddy(self.weights_preset)
+        data_layout.addWidget(label)
         data_layout.addWidget(self.weights_preset)
-
-        self.weights_edit = QtWidgets.QLineEdit()
-        self.weights_edit.setReadOnly(True)
-        self.weights_edit.setPlaceholderText("自动查找失败，请手动浏览可信的自定义 .pt")
-        self.weights_edit.setAccessibleName("实际训练权重文件")
-        self.weights_browse = self._button("更换", self._browse_training_weights, variant="quiet")
-        weight_row = QtWidgets.QHBoxLayout()
-        weight_row.setSpacing(8)
-        weight_row.addWidget(self.weights_edit, 1)
-        weight_row.addWidget(self.weights_browse)
-        weight_label = QtWidgets.QLabel("实际权重文件")
-        weight_label.setProperty("textRole", "fieldLabel")
-        data_layout.addWidget(weight_label)
-        data_layout.addLayout(weight_row)
-
-        weight_surface = QtWidgets.QFrame()
-        weight_surface.setProperty("surface", "soft")
-        weight_layout = QtWidgets.QHBoxLayout(weight_surface)
-        weight_layout.setContentsMargins(12, 10, 12, 10)
-        weight_layout.setSpacing(10)
         self.weight_family_badge = make_badge("P5 · 640px", "primary")
         self.weight_advice = QtWidgets.QLabel()
-        self.weight_advice.setProperty("textRole", "muted")
+        self.weight_advice.setProperty("textRole", "body")
         self.weight_advice.setWordWrap(True)
-        weight_layout.addWidget(self.weight_family_badge, 0, QtCore.Qt.AlignmentFlag.AlignTop)
-        weight_layout.addWidget(self.weight_advice, 1)
-        data_layout.addWidget(weight_surface)
+        data_layout.addWidget(self.weight_family_badge, 0, QtCore.Qt.AlignmentFlag.AlignLeft)
+        data_layout.addWidget(self.weight_advice)
 
-        run_card, run_layout = self._glass_card(
-            "训练参数",
-            "默认值适合当前 Windows 便携环境。",
-            elevated=False,
-            badge=make_badge("步骤 2", "neutral"),
-        )
+        self.weight_disclosure = DisclosureCard("自定义权重", "查看文件或使用其他兼容权重")
+        self.weights_edit = QtWidgets.QLineEdit()
+        self.weights_edit.setReadOnly(True)
+        self.weights_edit.setAccessibleName("实际训练权重文件")
+        self.weights_browse = self._button("更换", self._browse_training_weights, variant="quiet")
+        row = QtWidgets.QHBoxLayout()
+        row.addWidget(self.weights_edit, 1)
+        row.addWidget(self.weights_browse)
+        self.weight_disclosure.body_layout.addLayout(row)
+        data_layout.addWidget(self.weight_disclosure)
+        data_layout.addStretch()
+
+        run_card, run_layout = self._glass_card("安排这次训练", "02  /  任务与参数")
+        run_layout.setContentsMargins(28, 26, 28, 26)
+        run_layout.setSpacing(16)
         self.experiment_name = QtWidgets.QLineEdit("new_target")
         self.experiment_name.setAccessibleName("训练任务名称")
         self.epochs = QtWidgets.QSpinBox()
@@ -704,34 +560,27 @@ class WorkspaceManager(QtWidgets.QMainWindow):
         self.workers.setRange(0, 32)
         self.workers.setValue(0)
         self.workers.setSuffix(" 线程")
-        name_label = QtWidgets.QLabel("任务名称")
-        name_label.setProperty("textRole", "fieldLabel")
-        run_layout.addWidget(name_label)
-        run_layout.addWidget(self.experiment_name)
-        parameter_grid = QtWidgets.QGridLayout()
-        parameter_grid.setHorizontalSpacing(10)
-        parameter_grid.setVerticalSpacing(8)
-        parameters = (
-            ("训练轮数", self.epochs),
-            ("批量大小", self.batch_size),
-            ("图像尺寸", self.image_size),
-            ("数据线程", self.workers),
-        )
-        for index, (label, editor) in enumerate(parameters):
-            field = QtWidgets.QVBoxLayout()
-            field.setSpacing(5)
-            label_widget = QtWidgets.QLabel(label)
-            label_widget.setProperty("textRole", "fieldLabel")
-            field.addWidget(label_widget)
-            field.addWidget(editor)
-            parameter_grid.addLayout(field, index // 2, index % 2)
-            parameter_grid.setColumnStretch(index % 2, 1)
-        run_layout.addLayout(parameter_grid)
-        recommendation = QtWidgets.QLabel("批量大小设为“自动”、数据线程保持 0，可降低便携环境中的启动失败风险。")
-        recommendation.setProperty("textRole", "muted")
-        recommendation.setWordWrap(True)
-        run_layout.addWidget(recommendation)
-        run_layout.addStretch(1)
+        for text, editor in (("任务名称", self.experiment_name), ("训练轮数", self.epochs)):
+            label = QtWidgets.QLabel(text)
+            label.setProperty("textRole", "fieldLabel")
+            label.setBuddy(editor)
+            editor.setAccessibleName(text)
+            run_layout.addWidget(label)
+            run_layout.addWidget(editor)
+        self.advanced_training = DisclosureCard("高级参数", "自动批量 · 推荐尺寸 · 0 数据线程")
+        grid = QtWidgets.QFormLayout()
+        grid.setVerticalSpacing(12)
+        grid.setFieldGrowthPolicy(QtWidgets.QFormLayout.FieldGrowthPolicy.AllNonFixedFieldsGrow)
+        for text, editor in (("批量大小", self.batch_size), ("图像尺寸", self.image_size), ("数据线程", self.workers)):
+            editor.setAccessibleName(text)
+            grid.addRow(text, editor)
+        self.advanced_training.body_layout.addLayout(grid)
+        hint = QtWidgets.QLabel("首次训练建议保留默认值。基础模型改变时，图像尺寸会同步推荐值。")
+        hint.setWordWrap(True)
+        hint.setProperty("textRole", "body")
+        self.advanced_training.body_layout.addWidget(hint)
+        run_layout.addWidget(self.advanced_training)
+        run_layout.addStretch()
         columns.addWidget(data_card, 6)
         columns.addWidget(run_card, 4)
         self.training_columns_layout = columns
@@ -739,40 +588,40 @@ class WorkspaceManager(QtWidgets.QMainWindow):
 
         self._populate_weight_presets()
         self.weights_preset.currentIndexChanged.connect(self._on_weight_preset_changed)
-        default_index = next((i for i, preset in enumerate(PRESETS) if preset.key == "s"), 0)
-        self.weights_preset.setCurrentIndex(default_index)
-        self._on_weight_preset_changed(default_index)
+        index = next((i for i, preset in enumerate(PRESETS) if preset.key == "s"), 0)
+        self.weights_preset.setCurrentIndex(index)
+        self._on_weight_preset_changed(index)
 
         action_card = QtWidgets.QFrame()
         action_card.setObjectName("ActionBar")
-        action_card.setProperty("glass", "subtle")
-        action_layout = QtWidgets.QHBoxLayout(action_card)
-        action_layout.setContentsMargins(14, 11, 14, 11)
-        action_layout.setSpacing(8)
-        self.training_status_badge = make_badge("待机", "neutral")
-        self.btn_check_dataset = self._button("检查数据集", self._check_selected_dataset, variant="quiet")
+        actions = QtWidgets.QHBoxLayout(action_card)
+        actions.setContentsMargins(22, 16, 22, 16)
+        actions.setSpacing(8)
+        self.training_status_badge = make_badge("准备就绪", "neutral")
+        self.btn_check_dataset = self._button("检查数据", self._check_selected_dataset, variant="ghost")
         self.btn_start_training = self._button("开始训练", self._start_training, primary=True)
-        self.btn_resume_training = self._button("从检查点继续", self._resume_training, variant="quiet")
+        self.btn_resume_training = self._button("继续上次训练", self._resume_training, variant="quiet")
         self.btn_stop_training = self._button("停止", self._stop_training, variant="danger")
         self.btn_stop_training.setEnabled(False)
-        action_layout.addWidget(self.training_status_badge)
-        action_layout.addStretch(1)
-        action_layout.addWidget(self.btn_check_dataset)
-        action_layout.addWidget(self.btn_resume_training)
-        action_layout.addWidget(self.btn_stop_training)
-        action_layout.addWidget(self.btn_start_training)
+        actions.addWidget(self.training_status_badge)
+        actions.addStretch()
+        for button in (self.btn_check_dataset, self.btn_resume_training, self.btn_stop_training, self.btn_start_training):
+            actions.addWidget(button)
         layout.addWidget(action_card)
-
-        self.training_log_disclosure = DisclosureCard(
-            "训练输出", "进度、审计结果和错误会实时显示。", expanded=False
-        )
-        log_layout = self.training_log_disclosure.body_layout
+        note = QtWidgets.QLabel("训练结果保存为候选。审核并手动批准后，才能部署为生产模型。")
+        note.setWordWrap(True)
+        note.setProperty("textRole", "body")
+        layout.addWidget(note)
+        self.training_log_disclosure = DisclosureCard("训练输出", "进度、数据检查与运行结果")
         self.training_log = QtWidgets.QPlainTextEdit()
         self.training_log.setReadOnly(True)
-        self.training_log.setPlaceholderText("训练日志会实时显示在这里。关闭工作台前请先确认训练已结束。")
         self.training_log.setMinimumHeight(220)
-        log_layout.addWidget(self.training_log)
+        self.training_log.setPlaceholderText("开始训练或检查数据后，进度将显示在这里。")
+        self.training_log_disclosure.body_layout.addWidget(self.training_log)
+        self.btn_review_training = self._button("前往审核候选  →", lambda: self._show_page(2), variant="ghost")
+        self.training_log_disclosure.body_layout.addWidget(self.btn_review_training, 0, QtCore.Qt.AlignmentFlag.AlignLeft)
         layout.addWidget(self.training_log_disclosure)
+        layout.addStretch()
         return page
 
     def _build_deployment_tab(self):
@@ -783,22 +632,22 @@ class WorkspaceManager(QtWidgets.QMainWindow):
         safety_layout = QtWidgets.QHBoxLayout(safety)
         safety_layout.setContentsMargins(14, 11, 14, 11)
         safety_layout.setSpacing(10)
-        safety_layout.addWidget(make_badge("人工门禁", "warning"))
-        warning = QtWidgets.QLabel("程序不会自动批准。完成技术检查与 4 项人工复核后，才可复制到 RESULTS。")
+        safety_layout.addWidget(make_badge("人工批准", "neutral"))
+        warning = QtWidgets.QLabel("完成候选检查与四项人工复核，再批准部署。新模型始终由你决定是否启用。")
         warning.setProperty("textRole", "body")
         warning.setWordWrap(True)
         safety_layout.addWidget(warning, 1)
         layout.addWidget(safety)
 
         columns = QtWidgets.QHBoxLayout()
-        columns.setSpacing(12)
+        columns.setSpacing(24)
         evidence_card, evidence_layout = self._glass_card(
-            "候选与证据",
-            "先读取技术指纹，再用训练记录和真实媒体判断是否适合生产。",
+            "检查候选表现",
+            "01  /  读取类别，检查记录并测试真实媒体。",
             elevated=False,
             badge=make_badge("步骤 1", "neutral"),
         )
-        candidate_label = QtWidgets.QLabel("候选 best.pt")
+        candidate_label = QtWidgets.QLabel("训练候选（best.pt）")
         candidate_label.setProperty("textRole", "fieldLabel")
         evidence_layout.addWidget(candidate_label)
         candidate_row = QtWidgets.QHBoxLayout()
@@ -813,10 +662,10 @@ class WorkspaceManager(QtWidgets.QMainWindow):
         self.candidate_combo.setAccessibleName("候选模型 best.pt")
         candidate_row.addWidget(self.candidate_combo, 1)
         candidate_row.addWidget(self._button("浏览", self._browse_candidate, variant="quiet"))
-        candidate_row.addWidget(self._button("读取指纹与类别", self._inspect_candidate, primary=True))
+        candidate_row.addWidget(self._button("读取候选", self._inspect_candidate, variant="secondary"))
         evidence_layout.addLayout(candidate_row)
 
-        self.candidate_summary = QtWidgets.QLabel("尚未读取候选指纹与类别")
+        self.candidate_summary = QtWidgets.QLabel("选择训练候选，然后读取类别开始审核。")
         self.candidate_summary.setObjectName("CandidateSummary")
         self.candidate_summary.setProperty("surface", "soft")
         self.candidate_summary.setWordWrap(True)
@@ -826,11 +675,11 @@ class WorkspaceManager(QtWidgets.QMainWindow):
         evidence_actions = QtWidgets.QHBoxLayout()
         evidence_actions.setSpacing(8)
         evidence_actions.addWidget(self._button("打开训练目录", self._open_candidate_run, variant="quiet"))
-        evidence_actions.addWidget(self._button("使用真实媒体测试", self._test_candidate_media, variant="quiet"))
-        evidence_actions.addWidget(self._button("查看测试结果", lambda: self._open_path(TRAINING_OUTPUTS_DIR / "_REVIEWS"), variant="quiet"))
+        evidence_actions.addWidget(self._button("测试图片或视频", self._test_candidate_media, variant="quiet"))
+        evidence_actions.addWidget(self._button("测试结果", lambda: self._open_path(TRAINING_OUTPUTS_DIR / "_REVIEWS"), variant="quiet"))
         evidence_layout.addLayout(evidence_actions)
 
-        identity_header = QtWidgets.QLabel("生产身份与类别映射")
+        identity_header = QtWidgets.QLabel("部署名称与类别")
         identity_header.setProperty("textRole", "sectionTitle")
         evidence_layout.addWidget(identity_header)
         identity_grid = QtWidgets.QGridLayout()
@@ -851,27 +700,34 @@ class WorkspaceManager(QtWidgets.QMainWindow):
             identity_grid.setColumnStretch(column, 1)
         evidence_layout.addLayout(identity_grid)
 
-        self.class_table = QtWidgets.QTableWidget(0, 7)
-        self.class_table.setHorizontalHeaderLabels([
-            "权重类别", "统一 ID", "中文名", "英文名", "等级", "告警", "颜色",
-        ])
+        self.class_table = QtWidgets.QTableWidget(0, 4)
+        self.class_table.setHorizontalHeaderLabels(["权重类别", "显示名称", "风险等级", "告警"])
         header = self.class_table.horizontalHeader()
-        fixed_widths = {0: 80, 1: 108, 4: 112, 5: 58, 6: 102}
-        for column, width in fixed_widths.items():
-            header.setSectionResizeMode(column, QtWidgets.QHeaderView.ResizeMode.Fixed)
-            header.resizeSection(column, width)
-        header.setSectionResizeMode(2, QtWidgets.QHeaderView.ResizeMode.Stretch)
-        header.setSectionResizeMode(3, QtWidgets.QHeaderView.ResizeMode.Stretch)
+        header.setSectionResizeMode(QtWidgets.QHeaderView.ResizeMode.Stretch)
         self.class_table.setAlternatingRowColors(True)
         self.class_table.setSelectionBehavior(QtWidgets.QAbstractItemView.SelectionBehavior.SelectRows)
         self.class_table.verticalHeader().setVisible(False)
-        self.class_table.setMinimumHeight(220)
-        evidence_layout.addWidget(self.class_table, 1)
+        self.class_table.setMinimumHeight(190)
+        self.class_table.setMaximumHeight(260)
+        self.class_table.verticalHeader().setDefaultSectionSize(46)
+        self.class_table.setShowGrid(False)
+        self.class_table.setEditTriggers(QtWidgets.QAbstractItemView.EditTrigger.NoEditTriggers)
+        self.class_table.setSelectionMode(QtWidgets.QAbstractItemView.SelectionMode.SingleSelection)
+        self.class_table.setAccessibleName("候选类别映射与告警配置")
+        evidence_layout.addWidget(self.class_table)
+        self.class_editor_disclosure = DisclosureCard("类别设置", "选中上方类别，编辑名称、级别与告警规则")
+        self.class_editor_pages = QtWidgets.QStackedWidget()
+        self.class_editor_disclosure.body_layout.addWidget(self.class_editor_pages)
+        self.class_editor_disclosure.hide()
+        self.class_table.currentCellChanged.connect(self._select_class_editor)
+        self.class_table.cellClicked.connect(lambda row, column: self._select_class_editor(row, column))
+        evidence_layout.addWidget(self.class_editor_disclosure)
+        evidence_layout.addStretch()
 
         self.review_progress_badge = make_badge("0 / 4", "warning")
         gate_card, gate_layout = self._glass_card(
-            "生产安全门禁",
-            "全部条件都必须由审核人逐项确认。",
+            "确认，才能部署",
+            "02  /  请逐项完成以下四项人工复核。",
             elevated=True,
             badge=self.review_progress_badge,
         )
@@ -919,7 +775,7 @@ class WorkspaceManager(QtWidgets.QMainWindow):
         self.review_gate_hint.setProperty("textRole", "muted")
         self.review_gate_hint.setWordWrap(True)
         gate_layout.addWidget(self.review_gate_hint)
-        self.btn_deploy = self._button("人工批准并部署", self._deploy_candidate, primary=True)
+        self.btn_deploy = self._button("批准并部署", self._deploy_candidate, primary=True)
         self.btn_deploy.setMinimumHeight(42)
         self.btn_deploy.setEnabled(False)
         gate_layout.addWidget(self.btn_deploy)
@@ -928,6 +784,12 @@ class WorkspaceManager(QtWidgets.QMainWindow):
         columns.addWidget(gate_card, 4)
         self.review_columns_layout = columns
         layout.addLayout(columns)
+        self.review_log_disclosure = DisclosureCard("测试输出", "真实媒体测试的进度与结果")
+        self.review_log = QtWidgets.QPlainTextEdit()
+        self.review_log.setReadOnly(True)
+        self.review_log.setMinimumHeight(180)
+        self.review_log_disclosure.body_layout.addWidget(self.review_log)
+        layout.addWidget(self.review_log_disclosure)
         layout.addStretch(1)
         self.candidate_combo.currentTextChanged.connect(self._candidate_selection_changed)
         self.deploy_model_id.textChanged.connect(self._update_review_gate)
@@ -939,7 +801,7 @@ class WorkspaceManager(QtWidgets.QMainWindow):
         page, layout = self._page()
         summary = QtWidgets.QHBoxLayout()
         summary.setSpacing(10)
-        total_card, self.models_total_metric = self._metric_card("生产模型", "—", "RESULTS 中已批准", "primary")
+        total_card, self.models_total_metric = self._metric_card("生产模型", "—", "已通过人工批准", "primary")
         ready_card, self.models_ready_metric = self._metric_card("当前可用", "—", "通过完整性检查", "success")
         policy_card, self.models_policy_metric = self._metric_card("加载策略", "手动选择", "新模型默认不启用", "neutral")
         for card in (total_card, ready_card, policy_card):
@@ -949,14 +811,14 @@ class WorkspaceManager(QtWidgets.QMainWindow):
         layout.addLayout(summary)
 
         catalog_card, catalog_layout = self._glass_card(
-            "生产模型目录",
-            "SENTINEL 动态扫描 RESULTS；新增模型仍需在检测窗口中手动勾选。",
+            "已批准的模型",
+            "在检测台勾选需要的模型。新增版本默认保持关闭。",
             elevated=True,
             badge=make_badge("只读视图", "neutral"),
         )
         actions = QtWidgets.QHBoxLayout()
         actions.setSpacing(8)
-        actions.addWidget(self._button("重新扫描 RESULTS", self._refresh_models, primary=True))
+        actions.addWidget(self._button("刷新模型", self._refresh_models, variant="quiet"))
         actions.addWidget(self._button("打开生产目录", lambda: self._open_path(RESULTS_DIR), variant="quiet"))
         actions.addWidget(self._button("打开归档", lambda: self._open_path(PROJECT_ROOT / "MODEL_ARCHIVE"), variant="quiet"))
         actions.addStretch(1)
@@ -975,7 +837,9 @@ class WorkspaceManager(QtWidgets.QMainWindow):
         self.models_table.setSortingEnabled(True)
         self.models_table.setShowGrid(False)
         self.models_table.verticalHeader().setVisible(False)
-        self.models_table.setMinimumHeight(420)
+        self.models_table.setMinimumHeight(300)
+        self.models_table.verticalHeader().setDefaultSectionSize(64)
+        self.models_table.setAccessibleName("生产模型列表")
         catalog_layout.addWidget(self.models_table, 1)
         self.models_hint = QtWidgets.QLabel()
         self.models_hint.setProperty("textRole", "muted")
@@ -1009,7 +873,7 @@ class WorkspaceManager(QtWidgets.QMainWindow):
         preset = self.weights_preset.itemData(index)
         if not isinstance(preset, WeightPreset):
             return
-        self.weights_edit.setText(str(preset.path))
+        self.weights_edit.setText(preset.path.relative_to(PROJECT_ROOT).as_posix())
         recommended_size = preset.image_size
         if self.image_size.value() in (self._last_recommended_image_size, 640, 1280):
             self.image_size.setValue(recommended_size)
@@ -1017,7 +881,7 @@ class WorkspaceManager(QtWidgets.QMainWindow):
         self.weight_family_badge.setText("%s · %dpx" % (preset.family, recommended_size))
         set_property(self.weight_family_badge, "badge", "warning" if preset.is_p6 else "primary")
         self.weight_advice.setText(
-            "%s：速度%s，精度%s，显存占用%s。%s。官方 COCO 预训练权重仅用于迁移学习初始化。"
+            "%s：速度%s，精度%s，显存占用%s。%s。"
             % (preset.display_name, preset.speed, preset.accuracy, preset.memory, preset.recommendation)
         )
 
@@ -1038,13 +902,13 @@ class WorkspaceManager(QtWidgets.QMainWindow):
         current = self.dataset_combo.currentText() if hasattr(self, "dataset_combo") else ""
         self.dataset_combo.clear()
         for path in sorted(paths, key=lambda item: str(item).lower()):
-            self.dataset_combo.addItem(str(path))
+            self.dataset_combo.addItem(path.relative_to(PROJECT_ROOT).as_posix())
         if current:
             self.dataset_combo.setCurrentText(current)
         else:
             recommended = PROJECT_ROOT / "DATASETS" / "combined_legacy_v1" / "dataset.yaml"
             if recommended.is_file():
-                self.dataset_combo.setCurrentText(str(recommended))
+                self.dataset_combo.setCurrentText(recommended.relative_to(PROJECT_ROOT).as_posix())
 
     def _refresh_candidates(self):
         if not hasattr(self, "candidate_combo"):
@@ -1058,7 +922,7 @@ class WorkspaceManager(QtWidgets.QMainWindow):
         blocker = QtCore.QSignalBlocker(self.candidate_combo)
         self.candidate_combo.clear()
         for path in candidates:
-            self.candidate_combo.addItem(str(path))
+            self.candidate_combo.addItem(path.relative_to(PROJECT_ROOT).as_posix())
         if current:
             self.candidate_combo.setCurrentText(current)
         new_current = self.candidate_combo.currentText()
@@ -1093,7 +957,8 @@ class WorkspaceManager(QtWidgets.QMainWindow):
             for column, value in enumerate(values):
                 item = QtWidgets.QTableWidgetItem(value)
                 if column == 3:
-                    item.setForeground(QtGui.QColor("#78F0C5" if model.selectable else "#FF9AAE"))
+                    item.setForeground(QtGui.QColor(tokens(False)["success" if model.selectable else "danger"]))
+                item.setToolTip(str(value))
                 self.models_table.setItem(row, column, item)
         self.models_table.setSortingEnabled(sorting_enabled)
         total = len(snapshot.models)
@@ -1134,6 +999,8 @@ class WorkspaceManager(QtWidgets.QMainWindow):
         log.clear()
         if log is self.home_log and hasattr(self, "home_log_disclosure"):
             self.home_log_disclosure.set_expanded(True)
+        if log is self.review_log:
+            self.review_log_disclosure.set_expanded(True)
         process = QtCore.QProcess(self)
         self._prepare_process(process)
         process.setProcessChannelMode(QtCore.QProcess.ProcessChannelMode.MergedChannels)
@@ -1346,10 +1213,16 @@ class WorkspaceManager(QtWidgets.QMainWindow):
 
     def _candidate_selection_changed(self, _text=None):
         self.candidate_info = None
-        self.candidate_summary.setText("尚未读取候选指纹与类别")
+        self.candidate_summary.setText("选择训练候选，然后读取类别开始审核。")
         self.deploy_model_id.clear()
         self.deploy_display_name.clear()
         self.class_table.setRowCount(0)
+        while self.class_editor_pages.count():
+            editor_page = self.class_editor_pages.widget(0)
+            self.class_editor_pages.removeWidget(editor_page)
+            editor_page.deleteLater()
+        self.class_editor_disclosure.set_expanded(False)
+        self.class_editor_disclosure.hide()
         self.class_editors = {}
         for checkbox in self.review_checks.values():
             checkbox.setChecked(False)
@@ -1410,11 +1283,16 @@ class WorkspaceManager(QtWidgets.QMainWindow):
         self._update_review_gate()
 
     def _populate_class_table(self, classes):
+        while self.class_editor_pages.count():
+            editor_page = self.class_editor_pages.widget(0)
+            self.class_editor_pages.removeWidget(editor_page)
+            editor_page.deleteLater()
         defaults = {
             "fire": ("fire", "火焰", "Fire", "critical", True, "#F43F5E"),
             "person": ("person", "未戴安全帽", "NO HELMET", "warning", True, "#38BDF8"),
             "hat": ("hat", "已戴安全帽", "Helmet", "none", False, "#EAB308"),
         }
+        blocker = QtCore.QSignalBlocker(self.class_table)
         self.class_table.setRowCount(len(classes))
         self.class_editors = {}
         for row, raw_name in enumerate(classes):
@@ -1425,17 +1303,55 @@ class WorkspaceManager(QtWidgets.QMainWindow):
             canonical, zh, en, severity_value, alert_value, color_value = defaults.get(
                 raw_name, (fallback_id, raw_name, raw_name, "none", False, "#60A5FA")
             )
-            raw_item = QtWidgets.QTableWidgetItem(raw_name); raw_item.setFlags(raw_item.flags() & ~QtCore.Qt.ItemFlag.ItemIsEditable)
             canonical_edit = QtWidgets.QLineEdit(canonical)
             zh_edit = QtWidgets.QLineEdit(zh)
             en_edit = QtWidgets.QLineEdit(en)
             severity = QtWidgets.QComboBox(); severity.addItems(["none", "info", "warning", "critical"]); severity.setCurrentText(severity_value)
             alert = QtWidgets.QCheckBox(); alert.setChecked(alert_value)
             color = QtWidgets.QLineEdit(color_value)
-            self.class_table.setItem(row, 0, raw_item)
-            for column, widget in ((1, canonical_edit), (2, zh_edit), (3, en_edit), (4, severity), (5, alert), (6, color)):
-                self.class_table.setCellWidget(row, column, widget)
             self.class_editors[raw_name] = (canonical_edit, zh_edit, en_edit, severity, alert, color)
+            editor_page = QtWidgets.QWidget()
+            grid = QtWidgets.QGridLayout(editor_page)
+            grid.setContentsMargins(0, 0, 0, 0)
+            grid.setHorizontalSpacing(16)
+            grid.setVerticalSpacing(10)
+            for index, (text, editor) in enumerate((("统一类别 ID", canonical_edit), ("颜色", color),
+                                                  ("中文名称", zh_edit), ("英文名称", en_edit),
+                                                  ("风险等级", severity), ("启用告警", alert))):
+                label = QtWidgets.QLabel(text)
+                label.setProperty("textRole", "fieldLabel")
+                label.setBuddy(editor)
+                editor.setAccessibleName(raw_name + "：" + text)
+                grid.addWidget(label, (index // 2) * 2, index % 2)
+                grid.addWidget(editor, (index // 2) * 2 + 1, index % 2)
+                grid.setColumnStretch(index % 2, 1)
+            self.class_editor_pages.addWidget(editor_page)
+            self._refresh_class_summary(row, raw_name)
+            zh_edit.textChanged.connect(lambda _text, r=row, name=raw_name: self._refresh_class_summary(r, name))
+            severity.currentTextChanged.connect(lambda _text, r=row, name=raw_name: self._refresh_class_summary(r, name))
+            alert.toggled.connect(lambda _value, r=row, name=raw_name: self._refresh_class_summary(r, name))
+        if classes:
+            self.class_table.setCurrentCell(0, 0)
+            self.class_editor_pages.setCurrentIndex(0)
+            self.class_editor_disclosure.show()
+        del blocker
+
+    def _select_class_editor(self, row, _column=0, *_previous):
+        if 0 <= row < self.class_editor_pages.count():
+            self.class_editor_pages.setCurrentIndex(row)
+            self.class_editor_disclosure.set_expanded(True)
+
+    def _refresh_class_summary(self, row, raw_name):
+        if raw_name not in self.class_editors:
+            return
+        _canonical, zh, _en, severity, alert, _color = self.class_editors[raw_name]
+        levels = {"none": "无", "info": "提示", "warning": "警告", "critical": "严重"}
+        values = (raw_name, zh.text(), levels.get(severity.currentText(), severity.currentText()),
+                  "启用" if alert.isChecked() else "关闭")
+        for column, value in enumerate(values):
+            item = QtWidgets.QTableWidgetItem(value)
+            item.setToolTip(value)
+            self.class_table.setItem(row, column, item)
 
     def _class_settings(self):
         settings = {}
@@ -1459,7 +1375,7 @@ class WorkspaceManager(QtWidgets.QMainWindow):
     def _test_candidate_media(self):
         current_path = Path(self.candidate_combo.currentText().strip()).resolve()
         if self.candidate_info is None or self.candidate_info.path != current_path:
-            QtWidgets.QMessageBox.warning(self, "尚未技术检查", "请先点击“读取指纹与类别”。")
+            QtWidgets.QMessageBox.warning(self, "尚未技术检查", "请先点击“读取候选”。")
             return
         media_path, _ = QtWidgets.QFileDialog.getOpenFileName(
             self,
@@ -1488,7 +1404,7 @@ class WorkspaceManager(QtWidgets.QMainWindow):
                 "--save-txt",
                 "--save-conf",
             ],
-            self.home_log,
+            self.review_log,
         )
         if process is None:
             return
@@ -1502,13 +1418,13 @@ class WorkspaceManager(QtWidgets.QMainWindow):
                     "已打开带检测框的结果。请同时检查漏报、误报和类别名称；程序不会自动勾选审核项。",
                 )
             else:
-                QtWidgets.QMessageBox.warning(self, "人工测试失败", "请在“开始”页查看运行日志。")
+                QtWidgets.QMessageBox.warning(self, "人工测试失败", "请查看本页下方的“测试输出”。")
 
         process.finished.connect(finished)
 
     def _deploy_candidate(self):
         if self.candidate_info is None or self.candidate_info.path != Path(self.candidate_combo.currentText().strip()).resolve():
-            QtWidgets.QMessageBox.warning(self, "尚未技术检查", "请先点击“读取指纹与类别”。")
+            QtWidgets.QMessageBox.warning(self, "尚未技术检查", "请先点击“读取候选”。")
             return
         try:
             model_id = safe_model_id(self.deploy_model_id.text())

@@ -88,7 +88,7 @@ TOKENS_LIGHT = dict(
     primary="#2F6FED", accent="#0891B2", accentSoft="#2F6FED",
     success="#159A75", warn="#C78312", danger="#D74252", info="#2F6FED",
 )
-DARK = True
+DARK = False
 REDUCE_MOTION = reduce_motion_enabled()
 
 # ===================== 使用者 / 权限 =====================
@@ -204,42 +204,16 @@ QBtn = AnimatedButton
 
 # ===================== 主题化下拉 =====================
 class ThemedComboBox(QtWidgets.QComboBox):
-    def __init__(self, *a, **kw):
-        super().__init__(*a, **kw)
-        self.setEditable(False); self.setMinimumHeight(36)
-        self._apply_qss()
-    def _apply_qss(self):
-        t = app_tokens(DARK)
-        self.setStyleSheet(f"""
-            QComboBox {{
-                background:{t['glass_alt']}; color:{t['text']};
-                border:1px solid {t['hairline']}; border-radius:10px;
-                padding:5px 30px 5px 10px;
-            }}
-            QComboBox:focus {{
-                background:{t['glass_strong']};
-                border:2px solid {t['focus']};
-            }}
-            QComboBox::drop-down {{
-                width:24px; subcontrol-origin: padding; subcontrol-position: top right;
-                border-left: 1px solid {t['hairline']}; background:transparent;
-                border-top-right-radius:10px; border-bottom-right-radius:10px;
-            }}
-            QComboBox::down-arrow {{ image: none; width:0; height:0; }}
-            QComboBox QAbstractItemView {{
-                background:{t['surface']}; color:{t['text']};
-                border:1px solid {t['hairline_strong']};
-                selection-background-color: {t['primary_soft']};
-                selection-color: {t['text']};
-            }}
-        """)
-    def paintEvent(self, e):
-        super().paintEvent(e)
-        t = app_tokens(DARK); p = QtGui.QPainter(self); p.setRenderHint(QtGui.QPainter.Antialiasing)
-        r = self.rect(); cx = r.right()-12; cy = r.center().y()
-        tri = QtGui.QPolygonF([QtCore.QPointF(cx-5, cy-2), QtCore.QPointF(cx+5, cy-2), QtCore.QPointF(cx, cy+4)])
-        p.setBrush(QtGui.QColor(t["cyan"])); p.setPen(QtCore.Qt.PenStyle.NoPen); p.drawPolygon(tri); p.end()
-    def apply_theme(self): self._apply_qss(); self.update()
+    """Native combobox using the shared light/dark controls and chevron."""
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.setEditable(False)
+        self.setMinimumHeight(40)
+        self.setMinimumContentsLength(8)
+        self.setSizeAdjustPolicy(QtWidgets.QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon)
+
+    def apply_theme(self):
+        self.update()
 
 # ===================== 动态多模型推理线程 =====================
 class VideoWorker(QtCore.QThread):
@@ -1105,7 +1079,7 @@ class VideoCanvas(QtWidgets.QWidget):
     def __init__(self):
         super().__init__()
         self.setObjectName("VideoCanvas")
-        self.setMinimumSize(520, 292)
+        self.setMinimumSize(320, 200)
         self.setSizePolicy(QtWidgets.QSizePolicy.Policy.Expanding, QtWidgets.QSizePolicy.Policy.Expanding)
         self._qimg=None; self._src_w=0; self._src_h=0
         self.setAttribute(QtCore.Qt.WidgetAttribute.WA_OpaquePaintEvent, True)
@@ -1194,7 +1168,37 @@ class VideoCanvas(QtWidgets.QWidget):
         p = QtGui.QPainter(self); p.setRenderHint(QtGui.QPainter.Antialiasing)
         # The image stage stays optically neutral in both app themes so video
         # luminance and detection overlays are judged against a stable field.
-        p.fillRect(self.rect(), QtGui.QColor("#02090E"))
+        if self._qimg:
+            p.fillRect(self.rect(), QtGui.QColor("#101113"))
+        else:
+            t = app_tokens(DARK)
+            p.fillRect(self.rect(), QtGui.QColor(t["surface"]))
+            p.setPen(QtCore.Qt.PenStyle.NoPen)
+            p.setBrush(QtGui.QColor(t["surface_alt"]))
+            p.drawRoundedRect(self.rect(), 16, 16)
+            center = self.rect().center()
+            cx, cy = center.x(), center.y() - 44
+            pen = QtGui.QPen(QtGui.QColor(t["border_strong"]), 2)
+            pen.setCapStyle(QtCore.Qt.PenCapStyle.RoundCap)
+            p.setPen(pen)
+            for x, y, sx, sy in ((cx-34, cy-25, 1, 1), (cx+34, cy-25, -1, 1), (cx-34, cy+25, 1, -1), (cx+34, cy+25, -1, -1)):
+                path = QtGui.QPainterPath(QtCore.QPointF(x+sx*12, y))
+                path.lineTo(x, y)
+                path.lineTo(x, y+sy*12)
+                p.drawPath(path)
+            font = self.font()
+            font.setPixelSize(24)
+            font.setWeight(QtGui.QFont.Weight.DemiBold)
+            p.setFont(font)
+            p.setPen(QtGui.QColor(t["text"]))
+            p.drawText(QtCore.QRect(12, cy+48, self.width()-24, 36), QtCore.Qt.AlignmentFlag.AlignCenter,
+                       getattr(self, "empty_title", "准备好，就开始。"))
+            font.setPixelSize(14)
+            font.setWeight(QtGui.QFont.Weight.Normal)
+            p.setFont(font)
+            p.setPen(QtGui.QColor(t["muted"]))
+            p.drawText(QtCore.QRect(24, cy+92, self.width()-48, 56), QtCore.Qt.AlignmentFlag.AlignHCenter | QtCore.Qt.TextFlag.TextWordWrap,
+                       getattr(self, "empty_detail", "选择本地视频或摄像头，画面将在这里显示。"))
         rect, scale = self._fit_rect()
         if self._qimg: p.drawImage(rect, self._qimg)
 
@@ -1331,28 +1335,45 @@ class MainWindow(QtWidgets.QMainWindow):
         self.role.currentTextChanged.connect(self.apply_role)
         self.lang.currentTextChanged.connect(self.on_language_change)
 
-        self.toolbar.addWidget(self.brand_mark)
+        self.brand_mark.hide()
         self.toolbar.addWidget(brand_block)
         self.toolbar.addWidget(self._spacer())
         self.toolbar.addWidget(self.system_badge)
         self.toolbar.addWidget(self.lbl_fps)
-        for widget in (self.btn_theme, self.btn_rm, self.lang, self.role):
-            self.toolbar.addWidget(widget)
+        self.preferences_button = QBtn("显示与权限")
+        self.preferences_button.setProperty("variant", "ghost")
+        preferences_menu = QtWidgets.QMenu(self.preferences_button)
+        preferences_widget = QtWidgets.QWidget()
+        preferences_form = QtWidgets.QFormLayout(preferences_widget)
+        preferences_form.setContentsMargins(18, 16, 18, 16)
+        preferences_form.setSpacing(12)
+        self.preference_language_label = QtWidgets.QLabel("界面语言")
+        self.preference_role_label = QtWidgets.QLabel("操作身份")
+        self.preference_language_label.setBuddy(self.lang)
+        self.preference_role_label.setBuddy(self.role)
+        preferences_form.addRow(self.preference_language_label, self.lang)
+        preferences_form.addRow(self.preference_role_label, self.role)
+        preferences_form.addRow(self.btn_theme, self.btn_rm)
+        preferences_action = QtWidgets.QWidgetAction(preferences_menu)
+        preferences_action.setDefaultWidget(preferences_widget)
+        preferences_menu.addAction(preferences_action)
+        self.preferences_button.setMenu(preferences_menu)
+        self.toolbar.addWidget(self.preferences_button)
 
         # 中心布局：检测画布与 Inspector 两个同级区域，无整列嵌套滚动。
         central = QtWidgets.QWidget()
         central.setObjectName("AppShell")
         central_layout = QtWidgets.QVBoxLayout(central)
-        central_layout.setContentsMargins(14, 14, 14, 14)
+        central_layout.setContentsMargins(24, 24, 24, 24)
         central_layout.setSpacing(0)
         self.main_splitter = QtWidgets.QSplitter(QtCore.Qt.Orientation.Horizontal)
         self.main_splitter.setChildrenCollapsible(False)
-        self.main_splitter.setHandleWidth(10)
+        self.main_splitter.setHandleWidth(20)
 
         # 主域：视频画布。
         self.viewport_card = self._card("ViewportFrame", "strong")
         L = QtWidgets.QVBoxLayout(self.viewport_card)
-        L.setContentsMargins(16, 15, 16, 16)
+        L.setContentsMargins(24, 20, 24, 20)
         L.setSpacing(12)
         monitor_header = QtWidgets.QHBoxLayout()
         monitor_header.setSpacing(10)
@@ -1362,7 +1383,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.monitor_eyebrow = QtWidgets.QLabel("LIVE DETECTION")
         self.monitor_eyebrow.setProperty("textRole", "eyebrow")
         self.monitor_title = QtWidgets.QLabel("实时检测")
-        self.monitor_title.setProperty("textRole", "pageTitle")
+        self.monitor_title.setProperty("textRole", "sectionTitle")
         monitor_copy.addWidget(self.monitor_eyebrow)
         monitor_copy.addWidget(self.monitor_title)
         self.live_badge = QtWidgets.QLabel("●  STANDBY")
@@ -1379,7 +1400,7 @@ class MainWindow(QtWidgets.QMainWindow):
         L.addLayout(monitor_header)
 
         self.canvas = VideoCanvas()
-        self.canvas.setMinimumHeight(420)
+        self.canvas.setMinimumHeight(300)
         self.canvas.setToolTip("单击放置区域顶点，双击闭合；编辑模式下可拖动顶点")
         L.addWidget(self.canvas, 1)
 
@@ -1391,7 +1412,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.transport_label = QtWidgets.QLabel("来源与播放")
         self.transport_label.setProperty("textRole", "fieldLabel")
         self.src_quick = ThemedComboBox()
-        self.src_quick.setMinimumWidth(230)
+        self.src_quick.setMinimumWidth(120)
         self.src_quick.setSizePolicy(QtWidgets.QSizePolicy.Policy.Expanding, QtWidgets.QSizePolicy.Policy.Fixed)
         self.btn_play = QBtn("播放")
         self.btn_pause = QBtn("暂停")
@@ -1399,13 +1420,13 @@ class MainWindow(QtWidgets.QMainWindow):
         self.btn_play.clicked.connect(lambda: self.worker.set_paused(False))
         self.btn_pause.clicked.connect(lambda: self.worker.set_paused(True))
         self.btn_stop.clicked.connect(self.stop_source)
-        self.btn_play.setProperty("variant", "primary")
+        self.btn_play.setProperty("variant", "secondary")
         self.btn_pause.setProperty("variant", "secondary")
         self.btn_stop.setProperty("variant", "danger")
         self.btn_play.setMinimumWidth(72)
         self.btn_pause.setMinimumWidth(72)
         self.btn_stop.setMinimumWidth(72)
-        transport.addWidget(self.transport_label)
+        self.transport_label.hide()
         transport.addWidget(self.src_quick, 1)
         transport.addWidget(self.btn_play)
         transport.addWidget(self.btn_pause)
@@ -1438,7 +1459,15 @@ class MainWindow(QtWidgets.QMainWindow):
         region.addWidget(self.btn_add_mask)
         region.addWidget(self.btn_edit_poly)
         region.addWidget(self.btn_clear_poly)
+        self.region_toggle = QtWidgets.QToolButton()
+        self.region_toggle.setCheckable(True)
+        self.region_toggle.setToolButtonStyle(QtCore.Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
+        self.region_toggle.setArrowType(QtCore.Qt.ArrowType.RightArrow)
+        self.region_toggle.setProperty("variant", "ghost")
+        self.region_toggle.toggled.connect(self._set_region_tools_visible)
+        L.addWidget(self.region_toggle, 0, QtCore.Qt.AlignmentFlag.AlignLeft)
         L.addWidget(self.region_bar)
+        self.region_bar.hide()
 
         # Inspector：来源、检测配置、事件复核按任务分层。
         self.inspector_panel = self._card("InspectorFrame", "strong")
@@ -1451,11 +1480,12 @@ class MainWindow(QtWidgets.QMainWindow):
         self.inspector_eyebrow.setProperty("textRole", "eyebrow")
         self.inspector_title = QtWidgets.QLabel("检测控制")
         self.inspector_title.setProperty("textRole", "sectionTitle")
-        inspector.addWidget(self.inspector_eyebrow)
-        inspector.addWidget(self.inspector_title)
+        self.inspector_eyebrow.hide()
+        self.inspector_title.hide()
         self.inspector_tabs = QtWidgets.QTabWidget()
         self.inspector_tabs.setObjectName("InspectorTabs")
         self.inspector_tabs.setDocumentMode(True)
+        self.inspector_tabs.tabBar().setDrawBase(False)
         self.inspector_tabs.setUsesScrollButtons(False)
         inspector.addWidget(self.inspector_tabs, 1)
 
@@ -1589,7 +1619,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.model_scroll.setWidgetResizable(True)
         self.model_scroll.setFrameShape(QtWidgets.QFrame.Shape.NoFrame)
         self.model_scroll.setMinimumHeight(138)
-        self.model_scroll.setMaximumHeight(200)
+        self.model_scroll.setMaximumHeight(220)
         self.model_scroll.setWidget(self.model_list_widget)
         C.addWidget(self.model_scroll, row, 0, 1, 3)
         row += 1
@@ -1708,15 +1738,25 @@ class MainWindow(QtWidgets.QMainWindow):
         T.addWidget(self.btn_export_json, 3, 2)
         T.setRowStretch(2, 1)
 
+        # Daily input controls sit beside the image, with network feeds in their tab.
+        self.source_actions = QtWidgets.QHBoxLayout()
+        self.source_actions.setSpacing(8)
+        self.source_actions.addWidget(self.btn_file)
+        self.btn_webcam.setProperty("variant", "quiet")
+        self.source_actions.addWidget(self.btn_webcam)
+        self.source_actions.addStretch()
+        L.insertLayout(1, self.source_actions)
+        self.source_quick_label.hide()
         self.inspector_tabs.addTab(self.source_tab, "来源")
         self.inspector_tabs.addTab(self.detection_tab, "检测")
         self.inspector_tabs.addTab(self.events_tab, "事件")
+        self.inspector_tabs.setCurrentWidget(self.detection_tab)
 
         self.main_splitter.addWidget(self.viewport_card)
         self.main_splitter.addWidget(self.inspector_panel)
         self.main_splitter.setStretchFactor(0, 1)
         self.main_splitter.setStretchFactor(1, 0)
-        self.main_splitter.setSizes([1060, 420])
+        self.main_splitter.setSizes([1060, 440])
         central_layout.addWidget(self.main_splitter)
         self.setCentralWidget(central)
 
@@ -2091,56 +2131,28 @@ class MainWindow(QtWidgets.QMainWindow):
     def _build_stylesheet(self):
         t = app_tokens(DARK)
         return build_app_stylesheet(dark=DARK) + f"""
-        QFrame#CardFrame {{
-            background:{t['glass']};
-            border:1px solid {t['hairline']};
-            border-radius:16px;
-        }}
-        QFrame#ViewportFrame {{
-            background:qlineargradient(x1:0, y1:0, x2:1, y2:1,
-                stop:0 {t['glass_strong']}, stop:1 {t['glass']});
-            border:1px solid {t['hairline_strong']};
-            border-radius:22px;
-        }}
-        QFrame#InspectorFrame {{
-            background:{t['sidebar_glass']};
-            border:1px solid {t['hairline_strong']};
-            border-radius:22px;
+        QFrame#ViewportFrame, QFrame#InspectorFrame {{
+            background:{t['surface']}; border:0; border-radius:20px;
         }}
         QFrame#TransportBar, QFrame#RegionBar {{
-            background:{t['glass_alt']};
-            border:1px solid {t['hairline']};
-            border-radius:14px;
+            background:transparent; border:0; border-radius:0;
         }}
-        QFrame#AlertDrawer {{
-            background:{t['sidebar_glass']};
-            border:0;
-            border-left:1px solid {t['hairline_strong']};
-        }}
-        QFrame#ModelRow {{
-            background:{t['glass_alt']};
-            border:1px solid {t['hairline']};
-            border-radius:10px;
-        }}
-        QFrame#Separator {{
-            background:{t['hairline']};
-            min-height:1px;
-            max-height:1px;
-            border:0;
-        }}
-        QWidget#VideoCanvas {{
-            background:#02090E;
-            border:1px solid {t['hairline_strong']};
-            border-radius:16px;
-        }}
+        QFrame#AlertDrawer {{ background:{t['surface']}; border:0; border-left:1px solid {t['border']}; }}
+        QFrame#ModelRow {{ background:{t['surface_alt']}; border:0; border-radius:12px; }}
+        QFrame#Separator {{ background:{t['border']}; min-height:1px; max-height:1px; border:0; }}
         QTabWidget#InspectorTabs::pane {{ background:transparent; border:0; top:-1px; }}
         QTabWidget#InspectorTabs > QWidget {{ background:transparent; }}
-        QLabel#SourceState {{ color:{t['muted']}; padding-left:4px; }}
-        QLabel#MutedLabel {{ color:{t['muted']}; font-size:12px; }}
-        QListView::item {{ border-bottom:1px solid {t['hairline']}; padding:9px 10px; }}
+        QTabBar::tab {{ min-height:38px; padding:0 18px; background:transparent; border:0; color:{t['muted']}; }}
+        QTabBar::tab:selected {{ background:{t['primary_soft']}; color:{t['cyan']}; border-radius:10px; }}
+        QTabBar::tab:hover {{ background:{t['surface_alt']}; }}
+        QLabel#SourceState {{ color:{t['muted']}; }}
+        QLabel#MutedLabel {{ color:{t['muted']}; font-size:13px; }}
+        QListView::item {{ border-bottom:1px solid {t['border']}; padding:12px; }}
         QListView::item:selected {{ border-left:3px solid {t['primary']}; }}
         QToolButton {{ text-align:left; }}
+        QToolBar#AppBar {{ padding:10px 24px; spacing:12px; }}
         """
+
     def _card(self, object_name="CardFrame", material="panel"):
         card = QtWidgets.QFrame()
         card.setObjectName(object_name)
@@ -2156,6 +2168,10 @@ class MainWindow(QtWidgets.QMainWindow):
     def _spacer(self):
         s = QtWidgets.QWidget(); s.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Expanding); return s
 
+    def _set_region_tools_visible(self, visible):
+        self.region_bar.setVisible(bool(visible))
+        self.region_toggle.setArrowType(QtCore.Qt.ArrowType.DownArrow if visible else QtCore.Qt.ArrowType.RightArrow)
+
     def _set_demo_sources_visible(self, visible):
         self.demo_sources_panel.setVisible(bool(visible))
         self.demo_toggle.setArrowType(
@@ -2165,11 +2181,14 @@ class MainWindow(QtWidgets.QMainWindow):
     def _apply_responsive_layout(self):
         compact = self.width() < 1320
         short = self.height() < 880
+        self.canvas.setMinimumHeight(180 if short else 300)
         self.sub.setVisible(not compact)
-        self.regions_hint.setVisible(self.width() >= 1380)
-        self.source_state.setMaximumWidth(190 if compact else 320)
-        self.inspector_panel.setMinimumWidth(350 if compact else 380)
-        self.inspector_panel.setMaximumWidth(430 if compact else 500)
+        self.regions_hint.hide()
+        self.regions_label.hide()
+        self.system_badge.setVisible(not compact)
+        self.source_state.setMaximumWidth(150 if compact else 240)
+        self.inspector_panel.setMinimumWidth(390 if compact else 420)
+        self.inspector_panel.setMaximumWidth(430 if compact else 520)
         self.model_scroll.setMinimumHeight(115 if short else 138)
         self.model_scroll.setMaximumHeight(115 if short else 200)
         self.class_scroll.setMinimumHeight(54 if short else 88)
@@ -2188,7 +2207,14 @@ class MainWindow(QtWidgets.QMainWindow):
         self.title.setText(APP_NAME)
         self.sub.setText(SUBTITLE)
         is_zh = self.lang_code == "zh"
-        self.system_badge.setText("本地 · 离线" if is_zh else "LOCAL · OFFLINE")
+        self.system_badge.setText("本地计算" if is_zh else "LOCAL")
+        self.preferences_button.setText("显示与权限" if is_zh else "Preferences")
+        self.preference_language_label.setText("界面语言" if is_zh else "Language")
+        self.preference_role_label.setText("操作身份" if is_zh else "Role")
+        self.region_toggle.setText("分析区域" if is_zh else "Analysis regions")
+        self.canvas.empty_title = "准备好，就开始。" if is_zh else "Ready when you are."
+        self.canvas.empty_detail = "选择本地视频或摄像头，画面将在这里显示。" if is_zh else "Choose a video or webcam. Your feed will appear here."
+        self.canvas.update()
         self.btn_theme.setText(("浅色" if DARK else "深色") if is_zh else ("Light" if DARK else "Dark"))
         self.btn_rm.setText(
             ("动效：减弱" if REDUCE_MOTION else "动效：标准")
@@ -2198,10 +2224,10 @@ class MainWindow(QtWidgets.QMainWindow):
         self.btn_play.setText("播放" if is_zh else "Play")
         self.btn_pause.setText("暂停" if is_zh else "Pause")
         self.btn_stop.setText("停止" if is_zh else "Stop")
-        self.btn_add_roi.setText("添加 ROI" if is_zh else "Add ROI")
-        self.btn_add_mask.setText("添加屏蔽区" if is_zh else "Add Mask")
-        self.btn_edit_poly.setText("编辑顶点" if is_zh else "Edit Points")
-        self.btn_clear_poly.setText("清除区域" if is_zh else "Clear Regions")
+        self.btn_add_roi.setText("检测区域" if is_zh else "Add ROI")
+        self.btn_add_mask.setText("屏蔽区域" if is_zh else "Add Mask")
+        self.btn_edit_poly.setText("编辑" if is_zh else "Edit Points")
+        self.btn_clear_poly.setText("清除" if is_zh else "Clear Regions")
         self.btn_file.setText("选择本地视频" if is_zh else "Choose Local Video")
         self.txt_url.setPlaceholderText(self.L('url_ph'))
         self.btn_load.setText("连接" if is_zh else "Connect")
@@ -2210,7 +2236,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.btn_demo2.setText("防护示例" if is_zh else "PPE Sample")
         self.demo_toggle.setText("示例源 · 需要网络" if is_zh else "Sample feeds · network required")
         self.monitor_eyebrow.setText("LIVE DETECTION")
-        self.monitor_title.setText("检测画布" if is_zh else "Detection Canvas")
+        self.monitor_title.setText("实时检测" if is_zh else "Live detection")
         self.transport_label.setText("当前来源" if is_zh else "Current source")
         self.regions_label.setText("分析区域" if is_zh else "Analysis regions")
         self.regions_hint.setText(
@@ -2218,11 +2244,11 @@ class MainWindow(QtWidgets.QMainWindow):
         )
         self.inspector_eyebrow.setText("INSPECTOR")
         self.inspector_title.setText("操作与审查" if is_zh else "Controls & Review")
-        self.source_title.setText("添加来源" if is_zh else "Add a source")
+        self.source_title.setText("网络视频源" if is_zh else "Network sources")
         self.source_helper.setText(
-            "选择本地视频、设备或网络流；输入不会上传。"
+            "连接 RTSP 或 HTTP 视频流。也可以使用示例源检查界面。"
             if is_zh else
-            "Choose a local file, device, or network stream. Inputs stay on this machine."
+            "Connect an RTSP or HTTP stream, or try a sample feed."
         )
         self.source_url_label.setText("网络地址" if is_zh else "Network address")
         self.source_quick_label.setText("设备" if is_zh else "Device")
@@ -2252,7 +2278,7 @@ class MainWindow(QtWidgets.QMainWindow):
                 "Safety pipeline config is invalid; baseline is locked"
             )
         self.lbl_classes.setText("识别目标" if is_zh else "Detection targets")
-        self.btn_rescan_models.setText("扫描 RESULTS" if is_zh else "Scan RESULTS")
+        self.btn_rescan_models.setText("刷新模型" if is_zh else "Refresh")
         self.lbl_conf.setText("置信阈值" if is_zh else "Confidence")
         self.lbl_iou.setText("重叠阈值" if is_zh else "NMS IoU")
         self.timeline_title.setText("事件审查" if is_zh else "Event review")
@@ -2635,8 +2661,11 @@ class MainWindow(QtWidgets.QMainWindow):
         self.drawer.resize(drawer_width, self.height())
         start = self.drawer.pos()
         end = QtCore.QPoint(self.width() - drawer_width, 0)
+        if not self.drawer_open:
+            self._drawer_return_focus = QtWidgets.QApplication.focusWidget()
         self.drawer_open = True
         self.drawer.raise_()
+        self.btn_close_drawer.setFocus()
         self.drawer_anim.stop()
         if REDUCE_MOTION:
             self.drawer.move(end)
@@ -2650,6 +2679,8 @@ class MainWindow(QtWidgets.QMainWindow):
         start = self.drawer.pos()
         end = QtCore.QPoint(self.width(), 0)
         self.drawer_open = False
+        if getattr(self, "_drawer_return_focus", None) is not None:
+            self._drawer_return_focus.setFocus()
         self.drawer_anim.stop()
         if REDUCE_MOTION:
             self.drawer.move(end)

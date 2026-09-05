@@ -149,6 +149,7 @@ def _check_key_widgets(window, QtWidgets) -> None:
 def _check_safety_and_responsiveness(window, QtWidgets) -> None:
     """Exercise UI-only state rules without invoking any external action."""
 
+    original_candidate = window.candidate_combo.currentText()
     _require(not window.btn_deploy.isEnabled(), "未读取候选模型时部署按钮必须禁用。")
     for checkbox in window.review_checks.values():
         checkbox.setChecked(True)
@@ -188,7 +189,7 @@ def _check_safety_and_responsiveness(window, QtWidgets) -> None:
 
     window.resize(960, 640)
     window._apply_responsive_layout()
-    _require(window.sidebar.width() == 78, "窄屏模式应收起侧栏。")
+    _require(all(button.isVisible() for button in window.nav_buttons), "窄屏顶部导航必须保持可见。")
     _require(
         window.review_columns_layout.direction() == QtWidgets.QBoxLayout.Direction.TopToBottom,
         "窄屏审核页应切换为单列。",
@@ -197,15 +198,20 @@ def _check_safety_and_responsiveness(window, QtWidgets) -> None:
 
     window.resize(1440, 960)
     window._apply_responsive_layout()
-    _require(window.sidebar.width() == 228, "宽屏模式应恢复完整侧栏。")
+    _require(window.navigation.isVisible(), "宽屏顶部导航必须保持可见。")
     _require(
         window.review_columns_layout.direction() == QtWidgets.QBoxLayout.Direction.LeftToRight,
         "宽屏审核页应恢复证据/门禁双栏。",
     )
     _require(not window.models_table.isColumnHidden(4), "宽屏应显示完整模型信息。")
+    window.candidate_combo.setCurrentText(original_candidate)
+    window._candidate_selection_changed()
 
 
 def _pump_events(application, QtCore) -> None:
+    from PySide6.QtTest import QTest
+
+    QTest.qWait(220)
     for _ in range(3):
         application.processEvents(QtCore.QEventLoop.ProcessEventsFlag.AllEvents, 100)
 
