@@ -285,7 +285,7 @@ def run_check():
         "train.py", "detect.py", "project_paths.py", "launcher_GPT.py",
         "SentinelVision4.py", "model_catalog.py", "model_runtime.py",
         "workspace_manager.py", "deployment_manager.py", "safe_train.py",
-        "pretrained_weights.py", "ui_theme.py",
+        "pretrained_weights.py", "ui_theme.py", "ui_motion.py", "ui_artwork.py",
         "dataset_audit.py", "portable/setup_environment.ps1",
         "portable/runtime_env.cmd",
         "portable/verify_workspace.py", "VERIFY_WORKSPACE.cmd",

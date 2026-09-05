@@ -211,7 +211,7 @@ def _check_safety_and_responsiveness(window, QtWidgets) -> None:
 def _pump_events(application, QtCore) -> None:
     from PySide6.QtTest import QTest
 
-    QTest.qWait(220)
+    QTest.qWait(300)
     for _ in range(3):
         application.processEvents(QtCore.QEventLoop.ProcessEventsFlag.AllEvents, 100)
 

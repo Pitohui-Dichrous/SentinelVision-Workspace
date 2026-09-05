@@ -43,10 +43,10 @@ from safety_pipeline import (
 )
 from safety_pipeline.types import ResolvedDetection
 from ui_font import install_ui_font
+from ui_motion import AnimatedTabWidget, DRAWER_ENTER_MS, DRAWER_EXIT_MS, is_keyboard_activation, motion_curve
 from ui_theme import (
     PressableButton,
     build_stylesheet as build_app_stylesheet,
-    reduce_motion_enabled,
     set_property,
     tokens as app_tokens,
 )
@@ -89,7 +89,6 @@ TOKENS_LIGHT = dict(
     success="#159A75", warn="#C78312", danger="#D74252", info="#2F6FED",
 )
 DARK = False
-REDUCE_MOTION = reduce_motion_enabled()
 
 # ===================== 使用者 / 权限 =====================
 RBAC_ENABLED = True
@@ -1319,12 +1318,8 @@ class MainWindow(QtWidgets.QMainWindow):
         self.lbl_fps.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
         self.btn_theme = QBtn("主题")
         self.btn_theme.clicked.connect(self.toggle_theme)
-        self.btn_rm = QBtn("动效")
-        self.btn_rm.clicked.connect(self.toggle_reduce_motion)
         self.btn_theme.setProperty("variant", "ghost")
-        self.btn_rm.setProperty("variant", "ghost")
         self.btn_theme.setToolTip("切换明暗主题")
-        self.btn_rm.setToolTip("减少非必要位移动效")
         self.lang = ThemedComboBox()
         self.lang.addItems(["zh-CN", "en-NZ"])
         self.lang.setFixedWidth(94)
@@ -1353,7 +1348,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.preference_role_label.setBuddy(self.role)
         preferences_form.addRow(self.preference_language_label, self.lang)
         preferences_form.addRow(self.preference_role_label, self.role)
-        preferences_form.addRow(self.btn_theme, self.btn_rm)
+        preferences_form.addRow(self.btn_theme)
         preferences_action = QtWidgets.QWidgetAction(preferences_menu)
         preferences_action.setDefaultWidget(preferences_widget)
         preferences_menu.addAction(preferences_action)
@@ -1482,7 +1477,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.inspector_title.setProperty("textRole", "sectionTitle")
         self.inspector_eyebrow.hide()
         self.inspector_title.hide()
-        self.inspector_tabs = QtWidgets.QTabWidget()
+        self.inspector_tabs = AnimatedTabWidget()
         self.inspector_tabs.setObjectName("InspectorTabs")
         self.inspector_tabs.setDocumentMode(True)
         self.inspector_tabs.tabBar().setDrawBase(False)
@@ -1771,8 +1766,8 @@ class MainWindow(QtWidgets.QMainWindow):
         self.drawer.raise_()
         self.drawer_open = False
         self.drawer_anim = QtCore.QPropertyAnimation(self.drawer, b"pos")
-        self.drawer_anim.setDuration(220)
-        self.drawer_anim.setEasingCurve(QtCore.QEasingCurve.Type.OutCubic)
+        self.drawer_anim.setDuration(DRAWER_ENTER_MS)
+        self.drawer_anim.setEasingCurve(motion_curve(drawer=True))
         self.drawer_layout = QtWidgets.QVBoxLayout(self.drawer)
         self.drawer_layout.setContentsMargins(22, 20, 22, 20)
         self.drawer_layout.setSpacing(12)
@@ -2216,11 +2211,6 @@ class MainWindow(QtWidgets.QMainWindow):
         self.canvas.empty_detail = "选择本地视频或摄像头，画面将在这里显示。" if is_zh else "Choose a video or webcam. Your feed will appear here."
         self.canvas.update()
         self.btn_theme.setText(("浅色" if DARK else "深色") if is_zh else ("Light" if DARK else "Dark"))
-        self.btn_rm.setText(
-            ("动效：减弱" if REDUCE_MOTION else "动效：标准")
-            if is_zh else
-            ("Motion: Reduced" if REDUCE_MOTION else "Motion: Full")
-        )
         self.btn_play.setText("播放" if is_zh else "Play")
         self.btn_pause.setText("暂停" if is_zh else "Pause")
         self.btn_stop.setText("停止" if is_zh else "Stop")
@@ -2317,7 +2307,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.is_viewer = (role == "Viewer")
         allow = not self.is_viewer
         widgets = [
-            self.btn_theme, self.btn_rm, self.lang,
+            self.btn_theme, self.lang,
             self.btn_play, self.btn_pause, self.btn_stop, self.src_quick,
             self.btn_add_roi, self.btn_add_mask, self.btn_edit_poly, self.btn_clear_poly,
             self.btn_file, self.txt_url, self.btn_load, self.btn_webcam, self.btn_demo1, self.btn_demo2,
@@ -2389,7 +2379,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def keyPressEvent(self, event):
         if event.key() == QtCore.Qt.Key.Key_Escape and self.drawer_open:
-            self._close_drawer()
+            self._close_drawer(animate=False)
             event.accept()
             return
         super().keyPressEvent(event)
@@ -2667,25 +2657,25 @@ class MainWindow(QtWidgets.QMainWindow):
         self.drawer.raise_()
         self.btn_close_drawer.setFocus()
         self.drawer_anim.stop()
-        if REDUCE_MOTION:
+        if is_keyboard_activation():
             self.drawer.move(end)
         else:
-            self.drawer_anim.setDuration(220)
+            self.drawer_anim.setDuration(DRAWER_ENTER_MS)
             self.drawer_anim.setStartValue(start)
             self.drawer_anim.setEndValue(end)
             self.drawer_anim.start()
 
-    def _close_drawer(self):
+    def _close_drawer(self, checked=False, *, animate=True):
         start = self.drawer.pos()
         end = QtCore.QPoint(self.width(), 0)
         self.drawer_open = False
         if getattr(self, "_drawer_return_focus", None) is not None:
             self._drawer_return_focus.setFocus()
         self.drawer_anim.stop()
-        if REDUCE_MOTION:
+        if not animate or is_keyboard_activation():
             self.drawer.move(end)
         else:
-            self.drawer_anim.setDuration(160)
+            self.drawer_anim.setDuration(DRAWER_EXIT_MS)
             self.drawer_anim.setStartValue(start)
             self.drawer_anim.setEndValue(end)
             self.drawer_anim.start()
@@ -2738,24 +2728,6 @@ class MainWindow(QtWidgets.QMainWindow):
         self.apply_theme()
         is_zh = self.lang_code == "zh"
         self.btn_theme.setText(("浅色" if DARK else "深色") if is_zh else ("Light" if DARK else "Dark"))
-    def toggle_reduce_motion(self):
-        global REDUCE_MOTION; REDUCE_MOTION = not REDUCE_MOTION
-        os.environ["SENTINEL_REDUCE_MOTION"] = "1" if REDUCE_MOTION else "0"
-        if REDUCE_MOTION and self.drawer_anim.state() == QtCore.QAbstractAnimation.State.Running:
-            self.drawer_anim.stop()
-            target_x = self.width() - self.drawer.width() if self.drawer_open else self.width()
-            self.drawer.move(target_x, 0)
-        is_zh = self.lang_code == "zh"
-        self.btn_rm.setText(
-            ("动效：减弱" if REDUCE_MOTION else "动效：标准")
-            if is_zh else
-            ("Motion: Reduced" if REDUCE_MOTION else "Motion: Full")
-        )
-        self.statusBar().showMessage(
-            ("已启用减弱动态" if REDUCE_MOTION else "已恢复标准动效")
-            if is_zh else
-            ("Reduced motion enabled" if REDUCE_MOTION else "Standard motion restored")
-        )
     def apply_theme(self):
         self.setStyleSheet(self._build_stylesheet())
         self.drawer.setStyleSheet("")

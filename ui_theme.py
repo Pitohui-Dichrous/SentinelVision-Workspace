@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
-import os
 from pathlib import Path
 
 from PySide6 import QtCore, QtGui, QtWidgets
+
+from ui_motion import PRESS_DURATION_MS, RELEASE_DURATION_MS, keyboard_activation, motion_curve
 
 
 # Keep the public token names compatible with the detection console.
@@ -51,16 +52,6 @@ def tokens(dark: bool = True):
     """Return the live theme token dictionary (legacy behavior)."""
 
     return DARK if dark else LIGHT
-
-
-_TRUE_VALUES = frozenset({"1", "true", "yes", "on", "reduce", "reduced"})
-
-
-def reduce_motion_enabled() -> bool:
-    """Honor the portable app's explicit reduced-motion environment switch."""
-
-    value = os.environ.get("SENTINEL_REDUCE_MOTION", "")
-    return value.strip().lower() in _TRUE_VALUES
 
 
 def set_property(widget, name: str, value):
@@ -112,9 +103,9 @@ class PressableButton(QtWidgets.QPushButton):
     remains interruptible.
     """
 
-    PRESS_SCALE = 0.975
-    PRESS_DURATION_MS = 140
-    RELEASE_DURATION_MS = 90
+    PRESS_SCALE = 0.97
+    PRESS_DURATION_MS = PRESS_DURATION_MS
+    RELEASE_DURATION_MS = RELEASE_DURATION_MS
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -124,7 +115,21 @@ class PressableButton(QtWidgets.QPushButton):
         self._press_inside = False
         self._press_animation = QtCore.QPropertyAnimation(self, b"visualScale", self)
         self._press_animation.setDuration(self.PRESS_DURATION_MS)
-        self._press_animation.setEasingCurve(QtCore.QEasingCurve.Type.OutCubic)
+        self._press_animation.setEasingCurve(motion_curve())
+        self._press_animation.finished.connect(self._finish_press)
+
+    def _finish_press(self):
+        if not self._mouse_press_active and self._visual_scale < 1.0:
+            self._animate_scale(1.0, self.RELEASE_DURATION_MS)
+
+    def event(self, event):
+        if event.type() in (QtCore.QEvent.Type.KeyPress, QtCore.QEvent.Type.KeyRelease,
+                            QtCore.QEvent.Type.Shortcut):
+            if hasattr(self, "_press_animation"):
+                self._reset_press()
+            with keyboard_activation():
+                return super().event(event)
+        return super().event(event)
 
     def _get_visual_scale(self) -> float:
         return self._visual_scale
@@ -137,9 +142,6 @@ class PressableButton(QtWidgets.QPushButton):
 
     def _animate_scale(self, target: float, duration_ms: int) -> None:
         self._press_animation.stop()
-        if reduce_motion_enabled():
-            self._set_visual_scale(1.0)
-            return
         if abs(self._visual_scale - target) < 0.0001:
             return
         self._press_animation.setDuration(duration_ms)
@@ -169,7 +171,12 @@ class PressableButton(QtWidgets.QPushButton):
         if event.button() == QtCore.Qt.MouseButton.LeftButton and self._mouse_press_active:
             self._mouse_press_active = False
             self._press_inside = False
-            self._animate_scale(1.0, self.RELEASE_DURATION_MS)
+            if self.rect().contains(event.position().toPoint()) and self._visual_scale > .985:
+                # Even a tap released between frames gets visible feedback.
+                # clicked still fires immediately; only the paint completes.
+                self._animate_scale(.98, 60)
+            else:
+                self._animate_scale(1.0, self.RELEASE_DURATION_MS)
         super().mouseReleaseEvent(event)
 
     def _reset_press(self):
@@ -495,6 +502,9 @@ def build_stylesheet(dark: bool = True) -> str:
     QLineEdit:read-only, QPlainTextEdit:read-only, QTextEdit:read-only {{ background: {t['glass']}; color: {t['muted']}; }}
     QLineEdit:disabled, QSpinBox:disabled, QDoubleSpinBox:disabled, QComboBox:disabled {{ color: {t['subtle']}; border-color: {t['border']}; }}
     QComboBox::drop-down {{ width: 30px; border: 0; border-left: 1px solid {t['hairline']}; }}
+    /* Use Qt's list popup: the native menu frame exposes the system's dark
+       palette behind our rounded view and adds clipping-prone scrollers. */
+    QComboBox {{ combobox-popup: 0; }}
     QComboBox:on {{ background: {t['glass_strong']}; border-color: {t['focus']}; }}
     QComboBox QAbstractItemView {{
         background: {t['surface']};
@@ -673,7 +683,6 @@ __all__ = [
     "make_button",
     "make_card",
     "make_glass_panel",
-    "reduce_motion_enabled",
     "set_property",
     "tokens",
 ]

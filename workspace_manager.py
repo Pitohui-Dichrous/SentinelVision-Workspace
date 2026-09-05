@@ -28,13 +28,13 @@ from project_paths import (
 )
 from ui_font import install_ui_font
 from ui_artwork import VisionArtwork
+from ui_motion import PageTransition
 from ui_theme import (
     PressableButton,
     build_stylesheet,
     make_badge,
     make_card,
     set_property,
-    reduce_motion_enabled,
     tokens,
 )
 
@@ -151,6 +151,10 @@ class WorkspaceManager(QtWidgets.QMainWindow):
         self.header_device_badge = make_badge("本地运行", "neutral")
         nav.addWidget(self.header_device_badge)
         outer.addWidget(self.navigation)
+        self.page_stage = QtWidgets.QWidget()
+        stage = QtWidgets.QVBoxLayout(self.page_stage)
+        stage.setContentsMargins(0, 0, 0, 0)
+        stage.setSpacing(0)
         self.page_header = QtWidgets.QFrame()
         self.page_header.setObjectName("PageHeader")
         heading = QtWidgets.QVBoxLayout(self.page_header)
@@ -167,17 +171,14 @@ class WorkspaceManager(QtWidgets.QMainWindow):
         self.page_subtitle.setWordWrap(True)
         for label in (self.page_eyebrow, self.page_title, self.page_subtitle):
             heading.addWidget(label)
-        outer.addWidget(self.page_header)
+        stage.addWidget(self.page_header)
         self.pages = QtWidgets.QStackedWidget()
         for build in (self._build_home_tab, self._build_training_tab, self._build_deployment_tab, self._build_models_tab):
             self.pages.addWidget(build())
-        outer.addWidget(self.pages, 1)
+        stage.addWidget(self.pages, 1)
+        outer.addWidget(self.page_stage, 1)
         self.setCentralWidget(shell)
-        self._page_effect = QtWidgets.QGraphicsOpacityEffect(self.pages)
-        self.pages.setGraphicsEffect(self._page_effect)
-        self._page_animation = QtCore.QPropertyAnimation(self._page_effect, b"opacity", self)
-        self._page_animation.setDuration(160)
-        self._page_animation.setEasingCurve(QtCore.QEasingCurve.Type.OutCubic)
+        self._page_transition = PageTransition(self.page_stage)
         self._show_page(0)
         QtCore.QTimer.singleShot(0, self._apply_responsive_layout)
 
@@ -185,22 +186,19 @@ class WorkspaceManager(QtWidgets.QMainWindow):
         if not 0 <= index < len(self.PAGE_META):
             return
         changed = self.pages.currentIndex() != index
-        self._page_animation.stop()
-        self.pages.setCurrentIndex(index)
-        self.nav_buttons[index].setChecked(True)
-        if changed:
-            self.nav_buttons[index].setFocus(QtCore.Qt.FocusReason.OtherFocusReason)
-        title, subtitle = self.PAGE_META[index]
-        self.page_eyebrow.setText(("WORKSPACE", "MODEL STUDIO  /  01", "MODEL STUDIO  /  02", "MODEL LIBRARY  /  03")[index])
-        self.page_title.setText(title)
-        self.page_subtitle.setText(subtitle)
-        self.page_header.setVisible(index != 0)
-        if changed and not reduce_motion_enabled() and self.isVisible():
-            self._page_animation.setStartValue(0.9)
-            self._page_animation.setEndValue(1.0)
-            self._page_animation.start()
-        else:
-            self._page_effect.setOpacity(1.0)
+
+        def change_page():
+            self.pages.setCurrentIndex(index)
+            self.nav_buttons[index].setChecked(True)
+            if changed:
+                self.nav_buttons[index].setFocus(QtCore.Qt.FocusReason.OtherFocusReason)
+            title, subtitle = self.PAGE_META[index]
+            self.page_eyebrow.setText(("WORKSPACE", "MODEL STUDIO  /  01", "MODEL STUDIO  /  02", "MODEL LIBRARY  /  03")[index])
+            self.page_title.setText(title)
+            self.page_subtitle.setText(subtitle)
+            self.page_header.setVisible(index != 0)
+
+        self._page_transition.run(change_page, animate=changed)
 
     def _apply_responsive_layout(self):
         if not hasattr(self, "models_summary_layout"):
@@ -448,10 +446,6 @@ class WorkspaceManager(QtWidgets.QMainWindow):
         local.setProperty("textRole", "caption")
         footer.addWidget(local)
         footer.addStretch()
-        self.motion_check = QtWidgets.QCheckBox("减少动效")
-        self.motion_check.setChecked(reduce_motion_enabled())
-        self.motion_check.toggled.connect(self._toggle_motion)
-        footer.addWidget(self.motion_check)
         tools = self._button("维护与帮助", lambda: None, variant="ghost")
         menu = QtWidgets.QMenu(tools)
         for text, callback in (
@@ -477,15 +471,6 @@ class WorkspaceManager(QtWidgets.QMainWindow):
         layout.addWidget(self.home_log_disclosure)
         layout.addStretch()
         return page
-
-    def _toggle_motion(self, reduced):
-        os.environ["SENTINEL_REDUCE_MOTION"] = "1" if reduced else "0"
-        if reduced:
-            self._page_animation.stop()
-            self._page_effect.setOpacity(1.0)
-            for button in self.findChildren(PressableButton):
-                button._press_animation.stop()
-                button.visualScale = 1.0
 
     def _build_training_tab(self):
         page, layout = self._page()

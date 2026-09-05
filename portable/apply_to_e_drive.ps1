@@ -25,6 +25,8 @@ $files = @(
     "SYNC_GITHUB.cmd", "GIT_STATUS.cmd", "DOWNLOAD_PRETRAINED_WEIGHTS.cmd",
     "project_paths.py", "pretrained_weights.py", "safe_train.py",
     "portable_check.py", "ui_theme.py", "workspace_manager.py",
+    "ui_motion.py", "ui_font.py", "ui_artwork.py",
+    "assets\ui\check.svg", "assets\ui\chevron-down.svg", "assets\ui\chevron-up.svg",
     "SentinelVision4.py", "START_HERE_CN.md", "PORTABLE_GUIDE_CN.md",
     "portable\git_common.ps1", "portable\install_git_tools.ps1",
     "portable\enable_git.ps1", "portable\save_version.ps1",
